@@ -1,0 +1,64 @@
+{
+  "name": "@countertype/clipper2-ts",
+  "version": "1.5.4",
+  "description": "TypeScript port of Clipper2 polygon clipping and offsetting library",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest --coverage",
+    "benchmark": "vitest --run benchmark",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "prepublishOnly": "npm run build && npm test",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "clipper",
+    "clipper2",
+    "polygon",
+    "clipping",
+    "offsetting",
+    "geometry",
+    "computational-geometry",
+    "boolean-operations",
+    "polygon-offset",
+    "minkowski",
+    "typescript"
+  ],
+  "author": "Angus Johnson (original C# version), TypeScript port by Jeremy Tribby",
+  "license": "BSL-1.0",
+  "homepage": "https://github.com/countertype/clipper2-ts#readme",
+  "bugs": {
+    "url": "https://github.com/countertype/clipper2-ts/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/countertype/clipper2-ts.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^18.15.0",
+    "@typescript-eslint/eslint-plugin": "^5.57.0",
+    "@typescript-eslint/parser": "^5.57.0",
+    "@vitest/ui": "^3.2.4",
+    "eslint": "^8.37.0",
+    "typescript": "^5.0.0",
+    "vitest": "^3.2.4"
+  },
+  "files": [
+    "dist/**/*",
+    "src/**/*",
+    "README.md",
+    "LICENSE"
+  ]
+}
