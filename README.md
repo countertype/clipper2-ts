@@ -1,5 +1,8 @@
 # clipper2-ts
 
+[![npm version](https://img.shields.io/npm/v/@countertype/clipper2-ts.svg)](https://www.npmjs.com/package/@countertype/clipper2-ts)
+[![license](https://img.shields.io/npm/l/@countertype/clipper2-ts.svg)](https://github.com/countertype/clipper2-ts/blob/main/LICENSE)
+
 TypeScript port of Angus Johnson's [Clipper2](https://github.com/AngusJohnson/Clipper2) library for polygon clipping and offsetting
 
 ## Installation
