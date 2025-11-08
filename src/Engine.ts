@@ -2733,16 +2733,17 @@ import {
         rec.top >= rect.top && rec.bottom <= rect.bottom;
     }
   
-    private checkSplitOwner(outrec: OutRec, splits: number[]): boolean {
-      for (const i of splits) {
-        let split: OutRec | null = this.outrecList[i];
-        if (split.pts === null && split.splits !== null &&
-          this.checkSplitOwner(outrec, split.splits)) return true; // #942
-        split = this.getRealOutRec(split);
-        if (split === null || split === outrec || split.recursiveSplit === outrec) continue;
-        split.recursiveSplit = outrec; // #599
-        
-        if (split.splits !== null && this.checkSplitOwner(outrec, split.splits)) return true;
+  private checkSplitOwner(outrec: OutRec, splits: number[]): boolean {
+    // nb: use indexing (not an iterator) in case 'splits' is modified inside this loop (#1029)
+    for (let i = 0; i < splits.length; i++) {
+      let split: OutRec | null = this.outrecList[splits[i]];
+      if (split.pts === null && split.splits !== null &&
+        this.checkSplitOwner(outrec, split.splits)) return true; // #942
+      split = this.getRealOutRec(split);
+      if (split === null || split === outrec || split.recursiveSplit === outrec) continue;
+      split.recursiveSplit = outrec; // #599
+      
+      if (split.splits !== null && this.checkSplitOwner(outrec, split.splits)) return true;
   
         if (!this.checkBounds(split) ||
             !this.containsRect(split.bounds, outrec.bounds) ||

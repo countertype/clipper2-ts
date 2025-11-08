@@ -40,13 +40,7 @@ const offset = Clipper.inflatePaths(subject, 10, JoinType.Round, EndType.Polygon
 
 ## API
 
-This port maintains API compatibility with Clipper2's C# implementation. Key types:
-
-- `Point64` - Integer coordinates `{x: number, y: number}`
-- `Path64` - Array of Point64
-- `Paths64` - Array of Path64
-- `FillRule` - EvenOdd, NonZero, Positive, Negative
-- `ClipType` - Intersection, Union, Difference, Xor
+This port follows the structure and functionality of Clipper2's C# implementation, with method names adapted to JavaScript conventions. Where C# uses `PascalCase` for methods (`AddPath`, `Execute`), this port uses `camelCase` (`addPath`, `execute`). Class names remain unchanged
 
 For detailed API documentation, see the [official Clipper2 docs](https://www.angusj.com/clipper2/Docs/Overview.htm)
 
