@@ -53,6 +53,8 @@ import {
     }
   }
   
+  // deprecated: kept for backward compatibility, use new LocalMinima() directly
+  // (no longer used internally for performance)
   export function createLocalMinima(vertex: Vertex, polytype: PathType, isOpen: boolean = false): LocalMinima {
     return new LocalMinima(vertex, polytype, isOpen);
   }
@@ -177,7 +179,7 @@ import {
       if ((vert.flags & VertexFlags.LocalMin) !== VertexFlags.None) return;
       vert.flags |= VertexFlags.LocalMin;
   
-      const lm = createLocalMinima(vert, polytype, isOpen);
+      const lm = new LocalMinima(vert, polytype, isOpen);
       minimaList.push(lm);
     }
   
@@ -197,7 +199,7 @@ import {
             v0 = new Vertex(pt, VertexFlags.None, null);
             vertexList.push(v0);
             prevV = v0;
-          } else if (!Point64Utils.equals(prevV!.pt, pt)) { // ie skips duplicates
+          } else if (!(prevV!.pt.x === pt.x && prevV!.pt.y === pt.y)) { // ie skips duplicates
             const currV: Vertex = new Vertex(pt, VertexFlags.None, prevV);
             vertexList.push(currV);
             prevV!.next = currV;
@@ -206,7 +208,7 @@ import {
         }
         
         if (prevV?.prev === null) continue;
-        if (!isOpen && Point64Utils.equals(prevV!.pt, v0!.pt)) prevV = prevV!.prev;
+        if (!isOpen && prevV!.pt.x === v0!.pt.x && prevV!.pt.y === v0!.pt.y) prevV = prevV!.prev;
         prevV!.next = v0;
         v0!.prev = prevV;
         if (!isOpen && prevV!.next === prevV) continue;
@@ -673,7 +675,7 @@ import {
       // that's using the data.
       this.isSortedMinimaList = false;
       for (const lm of reuseableData['minimaList']) {
-        this.minimaList.push(createLocalMinima(lm.vertex, lm.polytype, lm.isOpen));
+        this.minimaList.push(new LocalMinima(lm.vertex, lm.polytype, lm.isOpen));
         if (lm.isOpen) this.hasOpenPaths = true;
       }
     }
@@ -1990,7 +1992,7 @@ import {
         }
   
         // horizontal edges can pass under open paths at a LocMins
-        else if (Point64Utils.equals(pt, ae1.localMin!.vertex.pt) &&
+        else if (pt.x === ae1.localMin!.vertex.pt.x && pt.y === ae1.localMin!.vertex.pt.y &&
           !ClipperBase.isOpenEndVertex(ae1.localMin!.vertex)) {
           // find the other side of the LocMin and
           // if it's 'hot' join up with it ...
@@ -2226,13 +2228,13 @@ import {
       let result = e.nextInAEL;
       while (result !== null) {
         if (result.localMin?.equals(e.localMin)) return result;
-        if (!ClipperBase.isHorizontal(result) && !Point64Utils.equals(e.bot, result.bot)) result = null;
+        if (!ClipperBase.isHorizontal(result) && !(e.bot.x === result.bot.x && e.bot.y === result.bot.y)) result = null;
         else result = result.nextInAEL;
       }
       result = e.prevInAEL;
       while (result !== null) {
         if (result.localMin?.equals(e.localMin)) return result;
-        if (!ClipperBase.isHorizontal(result) && !Point64Utils.equals(e.bot, result.bot)) return null;
+        if (!ClipperBase.isHorizontal(result) && !(e.bot.x === result.bot.x && e.bot.y === result.bot.y)) return null;
         result = result.prevInAEL;
       }
       return result;
@@ -2246,9 +2248,9 @@ import {
       const opFront = outrec.pts!;
       const opBack = opFront.next!;
   
-      if (toFront && Point64Utils.equals(pt, opFront.pt)) {
+      if (toFront && pt.x === opFront.pt.x && pt.y === opFront.pt.y) {
         return opFront;
-      } else if (!toFront && Point64Utils.equals(pt, opBack.pt)) {
+      } else if (!toFront && pt.x === opBack.pt.x && pt.y === opBack.pt.y) {
         return opBack;
       }
   
@@ -2452,7 +2454,7 @@ import {
       path.push(lastPt);
   
       while (op2 !== op) {
-        if (!Point64Utils.equals(op2.pt, lastPt)) {
+        if (!(op2.pt.x === lastPt.x && op2.pt.y === lastPt.y)) {
           lastPt = op2.pt;
           path.push(lastPt);
         }
@@ -2572,8 +2574,8 @@ import {
       while (true) {
         // NB if preserveCollinear == true, then only remove 180 deg. spikes
         if (op2 !== null && InternalClipper.isCollinear(op2.prev.pt, op2.pt, op2.next!.pt) &&
-          (Point64Utils.equals(op2.pt, op2.prev.pt) || 
-           Point64Utils.equals(op2.pt, op2.next!.pt) || 
+          ((op2.pt.x === op2.prev.pt.x && op2.pt.y === op2.prev.pt.y) || 
+           (op2.pt.x === op2.next!.pt.x && op2.pt.y === op2.next!.pt.y) || 
            !this.preserveCollinear ||
            InternalClipper.dotProduct(op2.prev.pt, op2.pt, op2.next!.pt) < 0)) {
           
@@ -2666,7 +2668,7 @@ import {
 
     // de-link splitOp and splitOp.next from the path
     // while inserting the intersection point
-    if (Point64Utils.equals(ip, prevOp.pt) || Point64Utils.equals(ip, nextNextOp.pt)) {
+    if ((ip.x === prevOp.pt.x && ip.y === prevOp.pt.y) || (ip.x === nextNextOp.pt.x && ip.y === nextNextOp.pt.y)) {
       nextNextOp.prev = prevOp;
       prevOp.next = nextNextOp;
     } else {

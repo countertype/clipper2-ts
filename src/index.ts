@@ -36,7 +36,7 @@ export {
   VertexFlags,
   Vertex,
   LocalMinima,
-  createLocalMinima,
+  createLocalMinima, // deprecated: use new LocalMinima() directly
   IntersectNode,
   createIntersectNode,
   OutPt,

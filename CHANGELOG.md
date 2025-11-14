@@ -2,6 +2,16 @@
 
 All changes to this project will be documented in this file
 
+## [1.5.4-1.9a869ba] - 2025-11-14
+
+### Changed
+- Inlined point equality checks in hot paths for performance
+- Fast path in `productsAreEqual` for collinearity checks when coordinate values < 46341 (avoids BigInt overhead for typical cases while maintaining accuracy for larger values)
+
+### Deprecated
+- `createLocalMinima()` function (use `new LocalMinima()` constructor directly for better performance)
+
+
 ## [1.5.4] - 2025-11-08
 
 Current as of [9a869ba](https://github.com/AngusJohnson/Clipper2/commit/9a869ba62a3a4f1eff52f4a19ae64da5d65ac939)

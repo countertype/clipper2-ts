@@ -152,6 +152,11 @@ export namespace InternalClipper {
     const absC = Math.abs(c);
     const absD = Math.abs(d);
 
+    // fast path for typical coordinates: 46341^2 < 2^31 (safe for JS number multiplication)
+    if (absA < 46341 && absB < 46341 && absC < 46341 && absD < 46341) {
+      return a * b === c * d;
+    }
+
     const mulAb = multiplyUInt64(absA, absB);
     const mulCd = multiplyUInt64(absC, absD);
 
