@@ -4,16 +4,16 @@ All changes to this project will be documented in this file
 
 ## [1.5.4-2.9a869ba] - 2025-11-15
 
-### Changed
+### Added
 - Bounding box fast exit before expensive segment intersection checks
 
 ## [1.5.4-1.9a869ba] - 2025-11-14
 
-### Changed
-- Inlined point equality checks in hot paths for performance
-
 ### Added 
 - Fast path in `productsAreEqual` for collinearity checks when coordinate values < 46341 (avoids BigInt overhead for typical cases while maintaining accuracy for larger values)
+
+### Changed
+- Inlined point equality checks in hot paths for performance
 
 ### Deprecated
 - `createLocalMinima()` function (use `new LocalMinima()` constructor directly for better performance)
