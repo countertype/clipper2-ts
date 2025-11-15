@@ -2,6 +2,11 @@
 
 All changes to this project will be documented in this file
 
+## [1.5.4-2.9a869ba] - 2025-11-15
+
+### Changed
+- Bounding box fast exit before expensive segment intersection checks
+
 ## [1.5.4-1.9a869ba] - 2025-11-14
 
 ### Changed

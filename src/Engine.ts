@@ -577,7 +577,23 @@ import {
       }
       return null;
     }
-  
+
+    // optimization (not in C# reference): fast bounding box overlap check for segment intersection
+    private boundingBoxesOverlap(p1: Point64, p2: Point64, p3: Point64, p4: Point64): boolean {
+      // segment 1: p1-p2, segment 2: p3-p4
+      const min1x = Math.min(p1.x, p2.x);
+      const max1x = Math.max(p1.x, p2.x);
+      const min1y = Math.min(p1.y, p2.y);
+      const max1y = Math.max(p1.y, p2.y);
+      
+      const min2x = Math.min(p3.x, p4.x);
+      const max2x = Math.max(p3.x, p4.x);
+      const min2y = Math.min(p3.y, p4.y);
+      const max2y = Math.max(p3.y, p4.y);
+      
+      return !(max1x < min2x || max2x < min1x || max1y < min2y || max2y < min1y);
+    }
+
     protected clearSolutionOnly(): void {
       while (this.actives !== null) this.deleteFromAEL(this.actives);
       this.scanlineList.length = 0;
@@ -2618,8 +2634,12 @@ import {
       
       while (true) {
         if (op2.next && op2.next.next && 
+            // optimization (not in C# reference): bbox check before segsIntersect  
+            this.boundingBoxesOverlap(op2.prev.pt, op2.pt, op2.next.pt, op2.next.next.pt) && // TEST: Bbox only
             InternalClipper.segsIntersect(op2.prev.pt, op2.pt, op2.next.pt, op2.next.next.pt)) {
           if (op2.next.next.next && 
+              // optimization (not in C# reference): bbox check before segsIntersect
+              this.boundingBoxesOverlap(op2.prev.pt, op2.pt, op2.next.next.pt, op2.next.next.next.pt) && // TEST: Bbox only
               InternalClipper.segsIntersect(op2.prev.pt, op2.pt, op2.next.next.pt, op2.next.next.next.pt)) {
             // adjacent intersections (ie a micro self-intersection)
             op2 = this.duplicateOp(op2, false);
