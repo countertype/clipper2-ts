@@ -11,6 +11,8 @@ All changes to this project will be documented in this file
 
 ### Changed
 - Inlined point equality checks in hot paths for performance
+
+### Added 
 - Fast path in `productsAreEqual` for collinearity checks when coordinate values < 46341 (avoids BigInt overhead for typical cases while maintaining accuracy for larger values)
 
 ### Deprecated
