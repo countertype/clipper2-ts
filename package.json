@@ -1,6 +1,6 @@
 {
-  "name": "@countertype/clipper2-ts",
-  "version": "1.5.4-2.9a869ba",
+  "name": "clipper2-ts",
+  "version": "1.5.4-4.9a869ba",
   "description": "TypeScript port of Clipper2 polygon clipping and offsetting library",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,7 +11,7 @@
     "test:watch": "vitest --watch",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
-    "benchmark": "vitest --run benchmark",
+    "benchmark": "vitest --run bench",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "prepublishOnly": "npm run build && npm test",

@@ -1,20 +1,20 @@
 # clipper2-ts
 
-[![npm version](https://img.shields.io/npm/v/@countertype/clipper2-ts.svg)](https://www.npmjs.com/package/@countertype/clipper2-ts)
-[![license](https://img.shields.io/npm/l/@countertype/clipper2-ts.svg)](https://github.com/countertype/clipper2-ts/blob/main/LICENSE)
+[![npm version](https://img.shields.io/npm/v/clipper2-ts.svg)](https://www.npmjs.com/package/clipper2-ts)
+[![license](https://img.shields.io/npm/l/clipper2-ts.svg)](https://github.com/countertype/clipper2-ts/blob/main/LICENSE)
 
 TypeScript port of Angus Johnson's [Clipper2](https://github.com/AngusJohnson/Clipper2) library for polygon clipping and offsetting
 
 ## Installation
 
 ```bash
-npm install @countertype/clipper2-ts
+npm install clipper2-ts
 ```
 
 ## Usage
 
 ```typescript
-import { Clipper, FillRule, JoinType, EndType } from '@countertype/clipper2-ts';
+import { Clipper, FillRule, JoinType, EndType } from 'clipper2-ts';
 
 // Define polygons as arrays of points
 const subject = [[

@@ -2,6 +2,11 @@
 
 All changes to this project will be documented in this file
 
+## [1.5.4-4.9a869ba] - 2025-11-17
+
+### Changed
+- Package renamed from `@countertype/clipper2-ts` to `clipper2-ts` (no scope)
+
 ## [1.5.4-3.9a869ba] - 2025-11-17
 
 ### Changed
