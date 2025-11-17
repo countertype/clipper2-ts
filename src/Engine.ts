@@ -24,7 +24,56 @@ import {
     LocalMin = 8
   }
   
-  export class Vertex {
+// C# keeps scanlines in a sorted list; here we use a heap to avoid O(n) splices.
+class ScanlineHeap {
+  private readonly data: number[] = [];
+
+  push(value: number): void {
+    this.data.push(value);
+    this.siftUp(this.data.length - 1);
+  }
+
+  pop(): number | null {
+    if (this.data.length === 0) return null;
+    const max = this.data[0];
+    const last = this.data.pop()!;
+    if (this.data.length > 0) {
+      this.data[0] = last;
+      this.siftDown(0);
+    }
+    return max;
+  }
+
+  clear(): void {
+    this.data.length = 0;
+  }
+
+  private siftUp(index: number): void {
+    while (index > 0) {
+      const parent = (index - 1) >> 1;
+      if (this.data[parent] >= this.data[index]) break;
+      [this.data[parent], this.data[index]] = [this.data[index], this.data[parent]];
+      index = parent;
+    }
+  }
+
+  private siftDown(index: number): void {
+    const length = this.data.length;
+    while (true) {
+      let largest = index;
+      const left = (index << 1) + 1;
+      const right = left + 1;
+
+      if (left < length && this.data[left] > this.data[largest]) largest = left;
+      if (right < length && this.data[right] > this.data[largest]) largest = right;
+      if (largest === index) break;
+      [this.data[index], this.data[largest]] = [this.data[largest], this.data[index]];
+      index = largest;
+    }
+  }
+}
+
+export class Vertex {
     public readonly pt: Point64;
     public next: Vertex | null = null;
     public prev: Vertex | null = null;
@@ -451,7 +500,8 @@ import {
     protected readonly intersectList: IntersectNode[] = [];
     protected readonly vertexList: Vertex[] = [];
     protected readonly outrecList: OutRec[] = [];
-    protected readonly scanlineList: number[] = [];
+    protected readonly scanlineHeap = new ScanlineHeap();
+    protected readonly scanlineSet = new Set<number>();
     protected readonly horzSegList: HorzSegment[] = [];
     protected readonly horzJoinList: HorzJoin[] = [];
     protected currentLocMin: number = 0;
@@ -596,7 +646,8 @@ import {
 
     protected clearSolutionOnly(): void {
       while (this.actives !== null) this.deleteFromAEL(this.actives);
-      this.scanlineList.length = 0;
+      this.scanlineHeap.clear();
+      this.scanlineSet.clear();
       this.disposeIntersectNodes();
       this.outrecList.length = 0;
       this.horzSegList.length = 0;
@@ -618,7 +669,8 @@ import {
         this.isSortedMinimaList = true;
       }
   
-      this.scanlineList.length = 0;
+      this.scanlineHeap.clear();
+      this.scanlineSet.clear();
       for (let i = this.minimaList.length - 1; i >= 0; i--) {
         this.insertScanline(this.minimaList[i].vertex.pt.y);
       }
@@ -631,36 +683,15 @@ import {
     }
   
     private insertScanline(y: number): void {
-      // Use binary search to find insertion point
-      let left = 0;
-      let right = this.scanlineList.length;
-      
-      while (left < right) {
-        const mid = Math.floor((left + right) / 2);
-        if (this.scanlineList[mid] < y) {
-          left = mid + 1;
-        } else {
-          right = mid;
-        }
-      }
-      
-      // Don't insert duplicates
-      if (left < this.scanlineList.length && this.scanlineList[left] === y) return;
-      
-      this.scanlineList.splice(left, 0, y);
+      if (this.scanlineSet.has(y)) return;
+      this.scanlineSet.add(y);
+      this.scanlineHeap.push(y);
     }
   
     private popScanline(): { success: boolean; y: number } {
-      let cnt = this.scanlineList.length - 1;
-      if (cnt < 0) {
-        return { success: false, y: 0 };
-      }
-  
-      const y = this.scanlineList[cnt];
-      this.scanlineList.splice(cnt--, 1);
-      while (cnt >= 0 && y === this.scanlineList[cnt]) {
-        this.scanlineList.splice(cnt--, 1);
-      }
+      const y = this.scanlineHeap.pop();
+      if (y === null) return { success: false, y: 0 };
+      this.scanlineSet.delete(y);
       return { success: true, y };
     }
   

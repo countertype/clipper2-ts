@@ -2,6 +2,11 @@
 
 All changes to this project will be documented in this file
 
+## [1.5.4-3.9a869ba] - 2025-11-17
+
+### Changed
+- Replaced the sorted scanline array in `ClipperBase` with a binary max-heap
+
 ## [1.5.4-2.9a869ba] - 2025-11-15
 
 ### Added
