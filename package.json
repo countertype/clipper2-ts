@@ -1,7 +1,8 @@
 {
   "name": "clipper2-ts",
-  "version": "1.5.4-4.9a869ba",
+  "version": "1.5.4-5.9a869ba",
   "description": "TypeScript port of Clipper2 polygon clipping and offsetting library",
+  "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -47,13 +48,13 @@
     "node": ">=14.0.0"
   },
   "devDependencies": {
-    "@types/node": "^18.15.0",
+    "@types/node": "^24.10.1",
     "@typescript-eslint/eslint-plugin": "^5.57.0",
     "@typescript-eslint/parser": "^5.57.0",
-    "@vitest/ui": "^3.2.4",
+    "@vitest/ui": "^4.0.10",
     "eslint": "^8.37.0",
     "typescript": "^5.0.0",
-    "vitest": "^3.2.4"
+    "vitest": "^4.0.10"
   },
   "files": [
     "dist/**/*",

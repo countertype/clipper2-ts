@@ -10,8 +10,8 @@
 import {
   Point64, PointD, Path64, PathD, Paths64, PathsD, FillRule, ClipType, PathType,
   Point64Utils, PointDUtils, InternalClipper
-} from './Core';
-import { Clipper64 } from './Engine';
+} from './Core.js';
+import { Clipper64 } from './Engine.js';
 
 export namespace Minkowski {
   function minkowskiInternal(pattern: Path64, path: Path64, isSum: boolean, isClosed: boolean): Paths64 {

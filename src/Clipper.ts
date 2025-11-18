@@ -14,11 +14,11 @@ import {
   ClipType, PathType, FillRule, PointInPolygonResult,
   InternalClipper, Point64Utils, PointDUtils, Rect64Utils, RectDUtils,
   InvalidRect64, InvalidRectD
-} from './Core';
-import { Clipper64, ClipperD, PolyTree64, PolyTreeD, PolyPathD } from './Engine';
-import { ClipperOffset, JoinType, EndType } from './Offset';
-import { RectClip64, RectClipLines64 } from './RectClip';
-import { Minkowski } from './Minkowski';
+} from './Core.js';
+import { Clipper64, ClipperD, PolyTree64, PolyTreeD, PolyPathD } from './Engine.js';
+import { ClipperOffset, JoinType, EndType } from './Offset.js';
+import { RectClip64, RectClipLines64 } from './RectClip.js';
+import { Minkowski } from './Minkowski.js';
 
 export namespace Clipper {
   // Constants

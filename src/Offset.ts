@@ -11,8 +11,8 @@ import {
   Point64, PointD, Path64, PathD, Paths64, PathsD,
   ClipType, FillRule,
   Point64Utils, PointDUtils, InternalClipper
-} from './Core';
-import { Clipper64, PolyTree64 } from './Engine';
+} from './Core.js';
+import { Clipper64, PolyTree64 } from './Engine.js';
 
 export enum JoinType {
   Miter = 0,

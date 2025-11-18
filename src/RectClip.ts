@@ -10,7 +10,7 @@
 import {
   Point64, PointD, Path64, PathD, Paths64, PathsD, Rect64, RectD,
   PointInPolygonResult, InternalClipper, Point64Utils, Rect64Utils, RectDUtils
-} from './Core';
+} from './Core.js';
 
 export class OutPt2 {
   public next: OutPt2 | null = null;

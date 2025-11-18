@@ -29,7 +29,7 @@ export {
   PathsUtils,
   InvalidRect64,
   InvalidRectD
-} from './Core';
+} from './Core.js';
 
 // Export engine classes
 export {
@@ -56,32 +56,32 @@ export {
   ClipperBase,
   Clipper64,
   ClipperD
-} from './Engine';
+} from './Engine.js';
 
 // Export offset functionality
 export {
   JoinType,
   EndType,
   ClipperOffset
-} from './Offset';
+} from './Offset.js';
 
 // Export rect clipping
 export {
   OutPt2,
   RectClip64,
   RectClipLines64
-} from './RectClip';
+} from './RectClip.js';
 
 // Export Minkowski operations
 export {
   Minkowski
-} from './Minkowski';
+} from './Minkowski.js';
 
 // Export main Clipper namespace with convenience functions
-export { Clipper } from './Clipper';
+export { Clipper } from './Clipper.js';
 
 // Re-export main functions for convenience
-import { Clipper } from './Clipper';
+import { Clipper } from './Clipper.js';
 
 export const {
   intersect,

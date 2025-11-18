@@ -10,8 +10,8 @@
 import {
     Point64, PointD, Path64, PathD, Paths64, PathsD, Rect64, RectD,
     ClipType, PathType, FillRule, PointInPolygonResult,
-    InternalClipper, Point64Utils, Rect64Utils
-  } from './Core';
+    InternalClipper, Point64Utils, Rect64Utils, PointDUtils, RectDUtils
+  } from './Core.js';
   
   // Vertex: a pre-clipping data structure. It is used to separate polygons
   // into ascending and descending 'bounds' (or sides) that start at local
