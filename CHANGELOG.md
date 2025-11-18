@@ -2,6 +2,12 @@
 
 All changes to this project will be documented in this file
 
+## [1.5.4-5.9a869ba] - 2025-11-18
+
+### Changed
+- Modernized build to ES modules with NodeNext module resolution
+- Updated to ES2022 target
+
 ## [1.5.4-4.9a869ba] - 2025-11-17
 
 ### Changed
