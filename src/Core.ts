@@ -89,22 +89,40 @@ export namespace InternalClipper {
     const c = pt2.y - pt1.y;
     const d = pt3.x - pt2.x;
 
-    const ab = multiplyUInt64(Math.abs(a), Math.abs(b));
-    const cd = multiplyUInt64(Math.abs(c), Math.abs(d));
-    const signAB = triSign(a) * triSign(b);
-    const signCD = triSign(c) * triSign(d);
-
-    if (signAB === signCD) {
-      let result: number;
-      if (ab.hi64 === cd.hi64) {
-        if (ab.lo64 === cd.lo64) return 0;
-        result = (ab.lo64 > cd.lo64) ? 1 : -1;
-      } else {
-        result = (ab.hi64 > cd.hi64) ? 1 : -1;
-      }
-      return (signAB > 0) ? result : -result;
+    // Fast check for safe integer range (approx 9.4e7)
+    // Using Math.abs inline allows short-circuiting
+    if (Math.abs(a) < 9e7 && Math.abs(b) < 9e7 && Math.abs(c) < 9e7 && Math.abs(d) < 9e7) {
+      const prod1 = a * b;
+      const prod2 = c * d;
+      return (prod1 > prod2) ? 1 : (prod1 < prod2) ? -1 : 0;
     }
-    return (signAB > signCD) ? 1 : -1;
+
+    // Optimization: Check signs first!
+    // This often avoids large number multiplication entirely.
+    const signA = (a < 0 ? -1 : (a > 0 ? 1 : 0));
+    const signB = (b < 0 ? -1 : (b > 0 ? 1 : 0));
+    const signC = (c < 0 ? -1 : (c > 0 ? 1 : 0));
+    const signD = (d < 0 ? -1 : (d > 0 ? 1 : 0));
+    
+    const signAB = signA * signB;
+    const signCD = signC * signD;
+
+    if (signAB !== signCD) {
+        return signAB > signCD ? 1 : -1;
+    }
+    
+    if (signAB === 0) return 0; // both 0 because signs equal
+
+    const bigA = BigInt(a);
+    const bigB = BigInt(b);
+    const bigC = BigInt(c);
+    const bigD = BigInt(d);
+
+    const prod1 = bigA * bigB;
+    const prod2 = bigC * bigD;
+
+    if (prod1 === prod2) return 0;
+    return (prod1 > prod2) ? 1 : -1;
   }
 
   export function checkPrecision(precision: number): void {
@@ -127,44 +145,46 @@ export namespace InternalClipper {
   }
 
   export function multiplyUInt64(a: number, b: number): UInt128Struct {
-    // Convert to BigInt for accurate 64-bit multiplication
-    const aBig = BigInt(a >>> 0); // Ensure unsigned
-    const bBig = BigInt(b >>> 0);
-    
-    const x1 = (aBig & 0xFFFFFFFFn) * (bBig & 0xFFFFFFFFn);
-    const x2 = (aBig >> 32n) * (bBig & 0xFFFFFFFFn) + (x1 >> 32n);
-    const x3 = (aBig & 0xFFFFFFFFn) * (bBig >> 32n) + (x2 & 0xFFFFFFFFn);
-    
-    const lobits = (x3 & 0xFFFFFFFFn) << 32n | (x1 & 0xFFFFFFFFn);
-    const hibits = (aBig >> 32n) * (bBig >> 32n) + (x2 >> 32n) + (x3 >> 32n);
+    // Fix: a and b might be larger than 2^32, so don't use >>> 0
+    const aBig = BigInt(a);
+    const bBig = BigInt(b);
+    const res = aBig * bBig;
     
     return {
-      lo64: Number(lobits & 0xFFFFFFFFFFFFFFFFn),
-      hi64: Number(hibits & 0xFFFFFFFFFFFFFFFFn)
+      lo64: Number(res & 0xFFFFFFFFFFFFFFFFn),
+      hi64: Number(res >> 64n)
     };
   }
 
   // returns true if (and only if) a * b == c * d
   export function productsAreEqual(a: number, b: number, c: number, d: number): boolean {
-    // nb: unsigned values will be needed for CalcOverflowCarry()
     const absA = Math.abs(a);
     const absB = Math.abs(b);
     const absC = Math.abs(c);
     const absD = Math.abs(d);
 
-    // fast path for typical coordinates: 46341^2 < 2^31 (safe for JS number multiplication)
+    // Fast path for typical coordinates
     if (absA < 46341 && absB < 46341 && absC < 46341 && absD < 46341) {
       return a * b === c * d;
     }
 
-    const mulAb = multiplyUInt64(absA, absB);
-    const mulCd = multiplyUInt64(absC, absD);
+    // Extended fast path for safe integer range (approx 9.4e7)
+    if (absA < 9e7 && absB < 9e7 && absC < 9e7 && absD < 9e7) {
+      return a * b === c * d;
+    }
 
-    // nb: it's important to differentiate 0 values here from other values
-    const signAb = triSign(a) * triSign(b);
-    const signCd = triSign(c) * triSign(d);
+    const signAb = (a < 0 ? -1 : (a > 0 ? 1 : 0)) * (b < 0 ? -1 : (b > 0 ? 1 : 0));
+    const signCd = (c < 0 ? -1 : (c > 0 ? 1 : 0)) * (d < 0 ? -1 : (d > 0 ? 1 : 0));
+    
+    if (signAb !== signCd) return false;
+    if (signAb === 0) return true;
 
-    return mulAb.lo64 === mulCd.lo64 && mulAb.hi64 === mulCd.hi64 && signAb === signCd;
+    const bigA = BigInt(absA);
+    const bigB = BigInt(absB);
+    const bigC = BigInt(absC);
+    const bigD = BigInt(absD);
+    
+    return (bigA * bigB) === (bigC * bigD);
   }
 
   export function isCollinear(pt1: Point64, sharedPt: Point64, pt2: Point64): boolean {

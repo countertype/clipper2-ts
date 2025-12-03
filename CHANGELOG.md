@@ -2,6 +2,15 @@
 
 All changes to this project will be documented in this file
 
+## [1.5.4-6.9a869ba] - 2025-12-02
+
+### Fixed
+- Corrected 64-bit integer handling in `multiplyUInt64` by replacing unsafe `>>> 0` truncation with `BigInt` arithmetic. This fixes incorrect results for coordinates larger than 2^32
+
+### Changed
+- Optimized `productsAreEqual` and `crossProductSign` with fast paths for safe integer ranges (approx +/- 9e7), avoiding `BigInt` overhead for typical use cases
+- Unrolled hot loops in `addPathsToVertexList` to standard `for` loops for improved V8 performance
+
 ## [1.5.4-5.9a869ba] - 2025-11-18
 
 ### Changed
@@ -74,4 +83,3 @@ Current as of [9741103](https://github.com/AngusJohnson/Clipper2/commit/97411032
 ## Notes
 
 This port is based on the C# version of Clipper2 by Angus Johnson. Original library: https://github.com/AngusJohnson/Clipper2
-

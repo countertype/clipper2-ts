@@ -239,11 +239,13 @@ export class Vertex {
       minimaList: LocalMinima[], 
       vertexList: Vertex[]
     ): void {
-      for (const path of paths) {
+      for (let i = 0, len = paths.length; i < len; i++) {
+        const path = paths[i];
         let v0: Vertex | null = null;
         let prevV: Vertex | null = null;
         
-        for (const pt of path) {
+        for (let j = 0, len2 = path.length; j < len2; j++) {
+          const pt = path[j];
           if (v0 === null) {
             v0 = new Vertex(pt, VertexFlags.None, null);
             vertexList.push(v0);
