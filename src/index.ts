@@ -20,6 +20,8 @@ export {
   PathType,
   FillRule,
   PointInPolygonResult,
+  ZCallback64,
+  ZCallbackD,
   InternalClipper,
   Point64Utils,
   PointDUtils,
@@ -76,6 +78,12 @@ export {
 export {
   Minkowski
 } from './Minkowski.js';
+
+// Export triangulation functionality
+export {
+  TriangulateResult,
+  Delaunay
+} from './Triangulation.js';
 
 // Export main Clipper namespace with convenience functions
 export { Clipper } from './Clipper.js';
@@ -142,5 +150,7 @@ export const {
   ramerDouglasPeucker,
   ramerDouglasPeuckerPaths,
   ramerDouglasPeuckerD,
-  ramerDouglasPeuckerPathsD
+  ramerDouglasPeuckerPathsD,
+  triangulate,
+  triangulateD
 } = Clipper;

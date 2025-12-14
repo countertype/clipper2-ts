@@ -41,6 +41,58 @@ const xor = Clipper.xor(subject, clip, FillRule.NonZero);
 const offset = Clipper.inflatePaths(subject, 10, JoinType.Round, EndType.Polygon);
 ```
 
+### Z-coordinate support
+
+Points can optionally carry a Z value (e.g., elevation, layer index, color):
+
+```typescript
+import { Clipper64, ClipType, FillRule, Paths64 } from 'clipper2-ts';
+
+// Create paths with Z values
+const subject: Paths64 = [[
+  { x: 0, y: 0, z: 10 },
+  { x: 100, y: 0, z: 10 },
+  { x: 100, y: 100, z: 20 },
+  { x: 0, y: 100, z: 20 }
+]];
+
+// Set a callback to determine Z for intersection points
+const clipper = new Clipper64();
+clipper.zCallback = (bot1, top1, bot2, top2, intersectPt) => {
+  // Z values may be undefined, use || 0 for safety
+  intersectPt.z = ((bot1.z || 0) + (top1.z || 0) + (bot2.z || 0) + (top2.z || 0)) / 4;
+};
+
+clipper.addSubject(subject);
+// ... add clip paths, execute, etc.
+```
+
+The callback is invoked at each intersection point, receiving the four edge endpoints and the intersection point to modify
+
+### Triangulation (BETA)
+
+Convert polygons into triangles using constrained Delaunay triangulation:
+
+```typescript
+import { Clipper, TriangulateResult } from 'clipper2-ts';
+
+const polygon = [[
+  { x: 0, y: 0 },
+  { x: 100, y: 0 },
+  { x: 100, y: 100 },
+  { x: 0, y: 100 }
+]];
+
+const { result, solution } = Clipper.triangulate(polygon);
+if (result === TriangulateResult.success) {
+  // solution contains triangles (each with 3 vertices)
+  console.log(`Created ${solution.length} triangles`);
+}
+
+// For floating-point coordinates:
+const { result: resultD, solution: solutionD } = Clipper.triangulateD(polygon, 2);
+```
+
 ## API
 
 This port follows the structure and functionality of Clipper2's C# implementation, with method names adapted to JavaScript conventions. Where C# uses `PascalCase` for methods (`AddPath`, `Execute`), this port uses `camelCase` (`addPath`, `execute`). Class names remain unchanged
@@ -49,14 +101,20 @@ For detailed API documentation, see the [official Clipper2 docs](https://www.ang
 
 ## Testing
 
-The port includes 235 tests validating against Clipper2's reference test suite:
+The port includes 258 tests validating against Clipper2's reference test suite:
 
 ```bash
-npm test              # Run all 235 tests
+npm test              # Run all tests
 npm test:coverage     # Run with coverage report
 ```
 
-Test results: 194/195 polygon tests pass (99.5%), matching C# reference implementation exactly. The single failure (Test 16, bow-tie polygon) also fails in C#
+All 258 tests pass, including:
+- 200 polygon clipping tests (matching C# reference implementation)
+- 17 line clipping tests
+- 6 offset tests
+- 18 triangulation tests
+- 5 Z-coordinate callback tests
+- Additional comprehensive and polytree tests
 
 ## License
 
@@ -64,4 +122,4 @@ Boost Software License 1.0 (same as Clipper2)
 
 ## Credits
 
-Original library by Angus Johnson. TypeScript port by Jeremy Tribby
+Original library by Angus Johnson. TypeScript port maintained by Jeremy Tribby

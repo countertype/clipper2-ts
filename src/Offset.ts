@@ -97,6 +97,7 @@ export class ClipperOffset {
   public miterLimit: number = 2.0;
   public preserveCollinear: boolean = false;
   public reverseSolution: boolean = false;
+  public zCallback?: (bot1: Point64, top1: Point64, bot2: Point64, top2: Point64, intersectPt: Point64) => void;
 
   public deltaCallback: ((path: Path64, pathNorms: PathD, currPt: number, prevPt: number) => number) | null = null;
 
@@ -115,6 +116,21 @@ export class ClipperOffset {
 
   public clear(): void {
     this.groupList.length = 0;
+  }
+
+  // Internal Z callback that implements default Z handling before calling user callback
+  private ZCB = (bot1: Point64, top1: Point64, bot2: Point64, top2: Point64, intersectPt: Point64): void => {
+    // Default Z handling: if endpoints share a Z value, use it
+    if ((bot1.z || 0) !== 0 && ((bot1.z === bot2.z) || (bot1.z === top2.z))) {
+      intersectPt.z = bot1.z;
+    } else if ((bot2.z || 0) !== 0 && bot2.z === top1.z) {
+      intersectPt.z = bot2.z;
+    } else if ((top1.z || 0) !== 0 && top1.z === top2.z) {
+      intersectPt.z = top1.z;
+    } else if (this.zCallback) {
+      // Fall back to user callback if no default applies
+      this.zCallback(bot1, top1, bot2, top2, intersectPt);
+    }
   }
 
   public addPath(path: Path64, joinType: JoinType, endType: EndType): void {
@@ -177,6 +193,7 @@ export class ClipperOffset {
     const c = new Clipper64();
     c.preserveCollinear = this.preserveCollinear;
     c.reverseSolution = this.reverseSolution !== pathsReversed;
+    c.zCallback = this.ZCB;
     c.addSubject(this.solution);
     
     if (this.solutionTree !== null) {

@@ -1,6 +1,6 @@
 /*******************************************************************************
 * Author    :  Angus Johnson                                                   *
-* Date      :  12 October 2025                                                 *
+* Date      :  12 December 2025                                                *
 * Website   :  https://www.angusj.com                                          *
 * Copyright :  Angus Johnson 2010-2025                                         *
 * Purpose   :  Core structures and functions for the Clipper Library           *
@@ -10,11 +10,13 @@
 export interface Point64 {
   x: number;
   y: number;
+  z?: number;
 }
 
 export interface PointD {
   x: number;
   y: number;
+  z?: number;
 }
 
 export type Path64 = Point64[];
@@ -66,6 +68,24 @@ export enum PointInPolygonResult {
   IsInside = 1,
   IsOutside = 2
 }
+
+// Z-coordinate callbacks
+// Called at each intersection to allow custom Z value computation
+export type ZCallback64 = (
+  bot1: Point64,
+  top1: Point64,
+  bot2: Point64,
+  top2: Point64,
+  intersectPt: Point64
+) => void;
+
+export type ZCallbackD = (
+  bot1: PointD,
+  top1: PointD,
+  bot2: PointD,
+  top2: PointD,
+  intersectPt: PointD
+) => void;
 
 export namespace InternalClipper {
   export const MaxInt64 = 9223372036854775807n;
@@ -246,16 +266,16 @@ export namespace InternalClipper {
     const det = dy1 * dx2 - dy2 * dx1;
     
     if (det === 0.0) {
-      return { intersects: false, point: { x: 0, y: 0 } };
+      return { intersects: false, point: { x: 0, y: 0, z: 0 } };
     }
 
     const t = ((ln1a.x - ln2a.x) * dy2 - (ln1a.y - ln2a.y) * dx2) / det;
     let ip: Point64;
     
     if (t <= 0.0) {
-      ip = { x: ln1a.x, y: ln1a.y };  // Create a copy to avoid mutating original
+      ip = { x: ln1a.x, y: ln1a.y, z: 0 };  // Create a copy to avoid mutating original
     } else if (t >= 1.0) {
-      ip = { x: ln1b.x, y: ln1b.y };  // Create a copy to avoid mutating original
+      ip = { x: ln1b.x, y: ln1b.y, z: 0 };  // Create a copy to avoid mutating original
     } else {
       // avoid using constructor (and rounding too) as they affect performance
       // Use Math.trunc to match C# (long) cast behavior which truncates towards zero
@@ -263,7 +283,8 @@ export namespace InternalClipper {
       const rawY = ln1a.y + t * dy1;
       ip = {
         x: Math.trunc(rawX),
-        y: Math.trunc(rawY)
+        y: Math.trunc(rawY),
+        z: 0
       };
     }
     
@@ -281,20 +302,21 @@ export namespace InternalClipper {
     const det = dy1 * dx2 - dy2 * dx1;
     
     if (det === 0.0) {
-      return { success: false, ip: { x: 0, y: 0 } };
+      return { success: false, ip: { x: 0, y: 0, z: 0 } };
     }
 
     const t = ((ln1a.x - ln2a.x) * dy2 - (ln1a.y - ln2a.y) * dx2) / det;
     let ip: PointD;
     
     if (t <= 0.0) {
-      ip = { ...ln1a };
+      ip = { ...ln1a, z: 0 };
     } else if (t >= 1.0) {
-      ip = { ...ln1b };
+      ip = { ...ln1b, z: 0 };
     } else {
       ip = {
         x: ln1a.x + t * dx1,
-        y: ln1a.y + t * dy1
+        y: ln1a.y + t * dy1,
+        z: 0
       };
     }
     
@@ -348,7 +370,7 @@ export namespace InternalClipper {
   }
 
   export function getClosestPtOnSegment(offPt: Point64, seg1: Point64, seg2: Point64): Point64 {
-    if (seg1.x === seg2.x && seg1.y === seg2.y) return { x: seg1.x, y: seg1.y };  // Return copy, not reference
+    if (seg1.x === seg2.x && seg1.y === seg2.y) return { x: seg1.x, y: seg1.y, z: 0 };  // Return copy, not reference
     
     const dx = (seg2.x - seg1.x);
     const dy = (seg2.y - seg1.y);
@@ -358,7 +380,8 @@ export namespace InternalClipper {
     return {
       // use Math.round to match the C# MidpointRounding.ToEven behavior
       x: Math.round(seg1.x + qClamped * dx),
-      y: Math.round(seg1.y + qClamped * dy)
+      y: Math.round(seg1.y + qClamped * dy),
+      z: 0
     };
   }
 
@@ -461,18 +484,19 @@ export namespace InternalClipper {
 
 // Point64 utility functions
 export namespace Point64Utils {
-  export function create(x: number = 0, y: number = 0): Point64 {
-    return { x: Math.round(x), y: Math.round(y) };
+  export function create(x: number = 0, y: number = 0, z: number = 0): Point64 {
+    return { x: Math.round(x), y: Math.round(y), z };
   }
 
   export function fromPointD(pt: PointD): Point64 {
-    return { x: Math.round(pt.x), y: Math.round(pt.y) };
+    return { x: Math.round(pt.x), y: Math.round(pt.y), z: pt.z || 0 };
   }
 
   export function scale(pt: Point64, scale: number): Point64 {
     return {
       x: Math.round(pt.x * scale),
-      y: Math.round(pt.y * scale)
+      y: Math.round(pt.y * scale),
+      z: pt.z || 0
     };
   }
 
@@ -481,30 +505,33 @@ export namespace Point64Utils {
   }
 
   export function add(a: Point64, b: Point64): Point64 {
-    return { x: a.x + b.x, y: a.y + b.y };
+    return { x: a.x + b.x, y: a.y + b.y, z: 0 };
   }
 
   export function subtract(a: Point64, b: Point64): Point64 {
-    return { x: a.x - b.x, y: a.y - b.y };
+    return { x: a.x - b.x, y: a.y - b.y, z: 0 };
   }
 
   export function toString(pt: Point64): string {
+    if (pt.z !== undefined && pt.z !== 0) {
+      return `${pt.x},${pt.y},${pt.z} `;
+    }
     return `${pt.x},${pt.y} `;
   }
 }
 
 // PointD utility functions
 export namespace PointDUtils {
-  export function create(x: number = 0, y: number = 0): PointD {
-    return { x, y };
+  export function create(x: number = 0, y: number = 0, z: number = 0): PointD {
+    return { x, y, z };
   }
 
   export function fromPoint64(pt: Point64): PointD {
-    return { x: pt.x, y: pt.y };
+    return { x: pt.x, y: pt.y, z: pt.z || 0 };
   }
 
   export function scale(pt: PointD, scale: number): PointD {
-    return { x: pt.x * scale, y: pt.y * scale };
+    return { x: pt.x * scale, y: pt.y * scale, z: pt.z || 0 };
   }
 
   export function equals(a: PointD, b: PointD): boolean {
@@ -518,6 +545,9 @@ export namespace PointDUtils {
   }
 
   export function toString(pt: PointD, precision: number = 2): string {
+    if (pt.z !== undefined && pt.z !== 0) {
+      return `${pt.x.toFixed(precision)},${pt.y.toFixed(precision)},${pt.z}`;
+    }
     return `${pt.x.toFixed(precision)},${pt.y.toFixed(precision)}`;
   }
 }
@@ -577,10 +607,10 @@ export namespace Rect64Utils {
 
   export function asPath(rect: Rect64): Path64 {
     return [
-      { x: rect.left, y: rect.top },
-      { x: rect.right, y: rect.top },
-      { x: rect.right, y: rect.bottom },
-      { x: rect.left, y: rect.bottom }
+      { x: rect.left, y: rect.top, z: 0 },
+      { x: rect.right, y: rect.top, z: 0 },
+      { x: rect.right, y: rect.bottom, z: 0 },
+      { x: rect.left, y: rect.bottom, z: 0 }
     ];
   }
 }
@@ -636,10 +666,10 @@ export namespace RectDUtils {
 
   export function asPath(rect: RectD): PathD {
     return [
-      { x: rect.left, y: rect.top },
-      { x: rect.right, y: rect.top },
-      { x: rect.right, y: rect.bottom },
-      { x: rect.left, y: rect.bottom }
+      { x: rect.left, y: rect.top, z: 0 },
+      { x: rect.right, y: rect.top, z: 0 },
+      { x: rect.right, y: rect.bottom, z: 0 },
+      { x: rect.left, y: rect.bottom, z: 0 }
     ];
   }
 }

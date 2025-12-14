@@ -2,6 +2,20 @@
 
 All changes to this project will be documented in this file
 
+## [Unreleased]
+
+Current as of [578ca4d](https://github.com/AngusJohnson/Clipper2/commit/578ca4d)
+
+### Added
+- Z-coordinate support: `Point64` and `PointD` now support optional `z` property
+- `ZCallback64` and `ZCallbackD` callback types for Z interpolation at intersections
+- `zCallback` property on `Clipper64`, `ClipperD`, and `ClipperOffset` classes
+- Triangulation support: constrained Delaunay triangulation (beta)
+  - `triangulate(paths, useDelaunay)` for integer coordinates
+  - `triangulateD(paths, decPlaces, useDelaunay)` for floating-point coordinates
+  - `TriangulateResult` enum for result status
+  - `Delaunay` class for advanced triangulation control
+
 ## [1.5.4-6.9a869ba] - 2025-12-02
 
 ### Fixed

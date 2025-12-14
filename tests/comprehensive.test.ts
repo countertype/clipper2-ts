@@ -125,10 +125,10 @@ describe('Comprehensive Integration Tests', () => {
     
     // Test point arithmetic
     const sum = Point64Utils.add(pt1, pt2);
-    expect(sum).toEqual({ x: 40, y: 60 });
+    expect(sum).toEqual({ x: 40, y: 60, z: 0 });
     
     const diff = Point64Utils.subtract(pt2, pt1);
-    expect(diff).toEqual({ x: 20, y: 20 });
+    expect(diff).toEqual({ x: 20, y: 20, z: 0 });
   });
 
   // Collinear point handling test

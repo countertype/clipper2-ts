@@ -19,6 +19,7 @@ import { Clipper64, ClipperD, PolyTree64, PolyTreeD, PolyPathD } from './Engine.
 import { ClipperOffset, JoinType, EndType } from './Offset.js';
 import { RectClip64, RectClipLines64 } from './RectClip.js';
 import { Minkowski } from './Minkowski.js';
+import { Delaunay, TriangulateResult } from './Triangulation.js';
 
 export namespace Clipper {
   // Constants
@@ -587,7 +588,7 @@ export namespace Clipper {
     const len = Math.floor(arr.length / 2);
     const p: Path64 = [];
     for (let i = 0; i < len; i++) {
-      p.push({ x: arr[i * 2], y: arr[i * 2 + 1] });
+      p.push({ x: arr[i * 2], y: arr[i * 2 + 1], z: 0 });
     }
     return p;
   }
@@ -596,7 +597,7 @@ export namespace Clipper {
     const len = Math.floor(arr.length / 2);
     const p: PathD = [];
     for (let i = 0; i < len; i++) {
-      p.push({ x: arr[i * 2], y: arr[i * 2 + 1] });
+      p.push({ x: arr[i * 2], y: arr[i * 2 + 1], z: 0 });
     }
     return p;
   }
@@ -1102,5 +1103,26 @@ export namespace Clipper {
       dx = x;
     }
     return result;
+  }
+
+  // Triangulation
+  export function triangulate(pp: Paths64, useDelaunay: boolean = true): { result: TriangulateResult, solution: Paths64 } {
+    const d = new Delaunay(useDelaunay);
+    return d.execute(pp);
+  }
+
+  export function triangulateD(pp: PathsD, decPlaces: number, useDelaunay: boolean = true): { result: TriangulateResult, solution: PathsD } {
+    let scale: number;
+    if (decPlaces <= 0) scale = 1.0;
+    else if (decPlaces > 8) scale = Math.pow(10.0, 8.0);
+    else scale = Math.pow(10.0, decPlaces);
+
+    const pp64 = scalePaths64(pp, scale);
+
+    const d = new Delaunay(useDelaunay);
+    const { result, solution: sol64 } = d.execute(pp64);
+
+    const solution = scalePathsD(sol64, 1.0 / scale);
+    return { result, solution };
   }
 }

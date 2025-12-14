@@ -10,6 +10,7 @@
 import {
     Point64, PointD, Path64, PathD, Paths64, PathsD, Rect64, RectD,
     ClipType, PathType, FillRule, PointInPolygonResult,
+    ZCallback64, ZCallbackD,
     InternalClipper, Point64Utils, Rect64Utils, PointDUtils, RectDUtils
   } from './Core.js';
   
@@ -119,7 +120,7 @@ export class Vertex {
   
   export function createIntersectNode(pt: Point64, edge1: Active, edge2: Active): IntersectNode {
     // Create a copy of pt to avoid reference sharing (C# uses struct which copies by value)
-    return { pt: { x: pt.x, y: pt.y }, edge1, edge2 };
+    return { pt: { x: pt.x, y: pt.y, z: pt.z || 0 }, edge1, edge2 };
   }
   
   // OutPt: vertex data structure for clipping solutions
@@ -194,8 +195,8 @@ export class Vertex {
   ///////////////////////////////////////////////////////////////////
   
   export class Active {
-    public bot: Point64 = { x: 0, y: 0 };
-    public top: Point64 = { x: 0, y: 0 };
+    public bot: Point64 = { x: 0, y: 0, z: 0 };
+    public top: Point64 = { x: 0, y: 0, z: 0 };
     public curX: number = 0; // current (updated at every new scanline) - keep as number but ensure integer precision
     public dx: number = 0;
     public windDx: number = 0; // 1 or -1 depending on winding direction
@@ -518,6 +519,51 @@ export class Vertex {
 
     constructor() {}
   
+    // Z-coordinate callback support
+    // Override in subclasses (Clipper64/ClipperD) to provide callback
+    protected getZCallback(): ZCallback64 | ZCallbackD | undefined {
+      return undefined;
+    }
+
+    private xyEqual(pt1: Point64, pt2: Point64): boolean {
+      return pt1.x === pt2.x && pt1.y === pt2.y;
+    }
+
+    private setZ(ae1: Active, ae2: Active, intersectPt: Point64): void {
+      const zCallback = this.getZCallback();
+      if (!zCallback) return;
+
+      // prioritize subject vertices over clip vertices
+      // and pass the subject vertices before clip vertices in the callback
+      if (ClipperBase.getPolyType(ae1) === PathType.Subject) {
+        if (this.xyEqual(intersectPt, ae1.bot)) {
+          intersectPt.z = ae1.bot.z;
+        } else if (this.xyEqual(intersectPt, ae1.top)) {
+          intersectPt.z = ae1.top.z;
+        } else if (this.xyEqual(intersectPt, ae2.bot)) {
+          intersectPt.z = ae2.bot.z;
+        } else if (this.xyEqual(intersectPt, ae2.top)) {
+          intersectPt.z = ae2.top.z;
+        } else {
+          intersectPt.z = 0; // DefaultZ
+        }
+        zCallback(ae1.bot, ae1.top, ae2.bot, ae2.top, intersectPt);
+      } else {
+        if (this.xyEqual(intersectPt, ae2.bot)) {
+          intersectPt.z = ae2.bot.z;
+        } else if (this.xyEqual(intersectPt, ae2.top)) {
+          intersectPt.z = ae2.top.z;
+        } else if (this.xyEqual(intersectPt, ae1.bot)) {
+          intersectPt.z = ae1.bot.z;
+        } else if (this.xyEqual(intersectPt, ae1.top)) {
+          intersectPt.z = ae1.top.z;
+        } else {
+          intersectPt.z = 0; // DefaultZ
+        }
+        zCallback(ae2.bot, ae2.top, ae1.bot, ae1.top, intersectPt);
+      }
+    }
+  
     // Helper functions
     private static isOdd(val: number): boolean {
       return (val & 1) !== 0;
@@ -804,11 +850,11 @@ export class Vertex {
           leftBound = null;
         } else {
           leftBound = new Active();
-          leftBound.bot = { x: localMinima.vertex.pt.x, y: localMinima.vertex.pt.y };  // Create copy
+          leftBound.bot = { x: localMinima.vertex.pt.x, y: localMinima.vertex.pt.y, z: localMinima.vertex.pt.z || 0 };  // Create copy
           leftBound.curX = localMinima.vertex.pt.x;
           leftBound.windDx = -1;
           leftBound.vertexTop = localMinima.vertex.prev;
-          leftBound.top = { x: localMinima.vertex.prev!.pt.x, y: localMinima.vertex.prev!.pt.y };  // Create copy
+          leftBound.top = { x: localMinima.vertex.prev!.pt.x, y: localMinima.vertex.prev!.pt.y, z: localMinima.vertex.prev!.pt.z || 0 };  // Create copy
           leftBound.outrec = null;
           leftBound.localMin = localMinima;
           ClipperBase.setDx(leftBound);
@@ -819,11 +865,11 @@ export class Vertex {
           rightBound = null;
         } else {
           rightBound = new Active();
-          rightBound.bot = { x: localMinima.vertex.pt.x, y: localMinima.vertex.pt.y };  // Create copy
+          rightBound.bot = { x: localMinima.vertex.pt.x, y: localMinima.vertex.pt.y, z: localMinima.vertex.pt.z || 0 };  // Create copy
           rightBound.curX = localMinima.vertex.pt.x;
           rightBound.windDx = 1;
           rightBound.vertexTop = localMinima.vertex.next; // i.e. ascending
-          rightBound.top = { x: localMinima.vertex.next!.pt.x, y: localMinima.vertex.next!.pt.y };  // Create copy
+          rightBound.top = { x: localMinima.vertex.next!.pt.x, y: localMinima.vertex.next!.pt.y, z: localMinima.vertex.next!.pt.z || 0 };  // Create copy
           rightBound.outrec = null;
           rightBound.localMin = localMinima;
           ClipperBase.setDx(rightBound);
@@ -1532,9 +1578,9 @@ export class Vertex {
     }
   
     private updateEdgeIntoAEL(ae: Active): void {
-      ae.bot = { x: ae.top.x, y: ae.top.y };  // Create copy
+      ae.bot = { x: ae.top.x, y: ae.top.y, z: ae.top.z || 0 };  // Create copy
       ae.vertexTop = ClipperBase.nextVertex(ae);
-      ae.top = { x: ae.vertexTop!.pt.x, y: ae.vertexTop!.pt.y };  // Create copy  
+      ae.top = { x: ae.vertexTop!.pt.x, y: ae.vertexTop!.pt.y, z: ae.vertexTop!.pt.z || 0 };  // Create copy  
       ae.curX = ae.bot.x;
       ClipperBase.setDx(ae);
   
@@ -1581,7 +1627,7 @@ export class Vertex {
       let ip: Point64;
       
       if (!intersectResult.intersects) {
-        ip = { x: ae1.curX, y: topY }; // parallel edges
+        ip = { x: ae1.curX, y: topY, z: 0 }; // parallel edges
       } else {
         ip = intersectResult.point;
       }
@@ -2032,6 +2078,7 @@ export class Vertex {
         // toggle contribution ...
         if (ClipperBase.isHotEdge(ae1)) {
           resultOp = this.addOutPt(ae1, pt);
+          this.setZ(ae1, ae2, resultOp.pt);
           if (ClipperBase.isFront(ae1)) {
             ae1.outrec!.frontEdge = null;
           } else {
@@ -2060,6 +2107,7 @@ export class Vertex {
         } else {
           resultOp = this.startOpenPath(ae1, pt);
         }
+        this.setZ(ae1, ae2, resultOp.pt);
         return;
       }
   
@@ -2127,17 +2175,21 @@ export class Vertex {
         if ((oldE1WindCount !== 0 && oldE1WindCount !== 1) || (oldE2WindCount !== 0 && oldE2WindCount !== 1) ||
             (ae1.localMin!.polytype !== ae2.localMin!.polytype && this.cliptype !== ClipType.Xor)) {
           resultOp = this.addLocalMaxPoly(ae1, ae2, pt);
+          if (resultOp) this.setZ(ae1, ae2, resultOp.pt);
         } else if (ClipperBase.isFront(ae1) || (ae1.outrec === ae2.outrec)) {
           // this 'else if' condition isn't strictly needed but
           // it's sensible to split polygons that only touch at
           // a common vertex (not at common edges).
           resultOp = this.addLocalMaxPoly(ae1, ae2, pt);
-          // C# non-USINGZ version calls AddLocalMinPoly here (without the max poly call)
-          this.addLocalMinPoly(ae1, ae2, pt);
+          if (resultOp) this.setZ(ae1, ae2, resultOp.pt);
+          const op2 = this.addLocalMinPoly(ae1, ae2, pt);
+          this.setZ(ae1, ae2, op2.pt);
         } else {
           // can't treat as maxima & minima
           resultOp = this.addOutPt(ae1, pt);
-          this.addOutPt(ae2, pt);
+          this.setZ(ae1, ae2, resultOp.pt);
+          const op2 = this.addOutPt(ae2, pt);
+          this.setZ(ae1, ae2, op2.pt);
           this.swapOutrecs(ae1, ae2);
         }
       }
@@ -2145,9 +2197,11 @@ export class Vertex {
       // if one or other edge is 'hot' ...
       else if (ClipperBase.isHotEdge(ae1)) {
         resultOp = this.addOutPt(ae1, pt);
+        this.setZ(ae1, ae2, resultOp.pt);
         this.swapOutrecs(ae1, ae2);
       } else if (ClipperBase.isHotEdge(ae2)) {
         resultOp = this.addOutPt(ae2, pt);
+        this.setZ(ae1, ae2, resultOp.pt);
         this.swapOutrecs(ae1, ae2);
       }
   
@@ -2171,6 +2225,7 @@ export class Vertex {
   
         if (!ClipperBase.isSamePolyType(ae1, ae2)) {
           resultOp = this.addLocalMinPoly(ae1, ae2, pt);
+          this.setZ(ae1, ae2, resultOp.pt);
         } else if (oldE1WindCount === 1 && oldE2WindCount === 1) {
           resultOp = null; 
           switch (this.cliptype) {
@@ -2195,6 +2250,7 @@ export class Vertex {
               resultOp = this.addLocalMinPoly(ae1, ae2, pt);
               break;
           }
+          if (resultOp) this.setZ(ae1, ae2, resultOp.pt);
         }
       }
     }
@@ -2816,6 +2872,12 @@ export class Vertex {
   }
   
   export class Clipper64 extends ClipperBase {
+    public zCallback?: ZCallback64;
+
+    protected getZCallback(): ZCallback64 | undefined {
+      return this.zCallback;
+    }
+
     public addPath(path: Path64, polytype: PathType, isOpen: boolean = false): void {
       super.addPath(path, polytype, isOpen);
     }
@@ -2883,6 +2945,7 @@ export class Vertex {
   }
   
   export class ClipperD extends ClipperBase {
+    public zCallback?: ZCallbackD;
     private readonly scale: number;
     private readonly invScale: number;
   
@@ -2892,13 +2955,18 @@ export class Vertex {
       this.scale = Math.pow(10, roundingDecimalPrecision);
       this.invScale = 1 / this.scale;
     }
+
+    protected getZCallback(): ZCallbackD | undefined {
+      return this.zCallback;
+    }
   
     private scalePathDFromInt(path: Path64, scale: number): PathD {
       const result: PathD = [];
       for (const pt of path) {
         result.push({
           x: pt.x * scale,
-          y: pt.y * scale
+          y: pt.y * scale,
+          z: pt.z || 0
         });
       }
       return result;

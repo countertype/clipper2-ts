@@ -1,6 +1,6 @@
 {
   "name": "clipper2-ts",
-  "version": "1.5.4-6.9a869ba",
+  "version": "1.5.4-7.578ca4d",
   "description": "TypeScript port of Clipper2 polygon clipping and offsetting library",
   "type": "module",
   "main": "dist/index.js",
