@@ -2,9 +2,18 @@
 
 All changes to this project will be documented in this file
 
-## [Unreleased]
+## [1.5.4-8.578ca4d] - 2025-12-15
 
 Current as of [578ca4d](https://github.com/AngusJohnson/Clipper2/commit/578ca4d)
+
+### Added
+- Glyph benchmark: `benchmarks/glyph-e.bench.ts` to measure union performance on a flattened outline typical of font contours
+
+### Changed
+- `ClipperBase.recursiveCheckOwners`: added bounds containment check before expensive `path1InsidePath2` test for faster polytree construction
+- `ClipperBase` scanline handling: added an adaptive array-backed scanline mode for small `minimaList` workloads, with automatic upgrade to the heap+set path when scanline count grows. This reduces overhead for small glyph-like unions while preserving existing behavior on larger inputs
+
+## [1.5.4-7.578ca4d] - 2025-12-14
 
 ### Added
 - Z-coordinate support: `Point64` and `PointD` now support optional `z` property

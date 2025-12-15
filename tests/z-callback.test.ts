@@ -158,3 +158,4 @@ describe('Z Callback Tests (PointD)', () => {
     expect(solution.length).toBeGreaterThan(0);
   });
 });
+

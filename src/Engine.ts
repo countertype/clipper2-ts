@@ -505,6 +505,11 @@ export class Vertex {
     protected readonly outrecList: OutRec[] = [];
     protected readonly scanlineHeap = new ScanlineHeap();
     protected readonly scanlineSet = new Set<number>();
+    // For very small inputs, a heap + set can cost more than it saves.
+    // Use an array-based scanline mode initially, and upgrade to heap+set
+    // automatically if the scanline list grows beyond a threshold.
+    protected readonly scanlineArr: number[] = [];
+    protected useScanlineArray: boolean = false;
     protected readonly horzSegList: HorzSegment[] = [];
     protected readonly horzJoinList: HorzJoin[] = [];
     protected currentLocMin: number = 0;
@@ -696,6 +701,7 @@ export class Vertex {
       while (this.actives !== null) this.deleteFromAEL(this.actives);
       this.scanlineHeap.clear();
       this.scanlineSet.clear();
+      this.scanlineArr.length = 0;
       this.disposeIntersectNodes();
       this.outrecList.length = 0;
       this.horzSegList.length = 0;
@@ -719,6 +725,10 @@ export class Vertex {
   
       this.scanlineHeap.clear();
       this.scanlineSet.clear();
+      this.scanlineArr.length = 0;
+      // Heuristic: local minima count correlates with number of scanlines and
+      // scanline insert/pop activity. For glyph-like inputs, this is typically small.
+      this.useScanlineArray = this.minimaList.length <= 16;
       for (let i = this.minimaList.length - 1; i >= 0; i--) {
         this.insertScanline(this.minimaList[i].vertex.pt.y);
       }
@@ -730,13 +740,54 @@ export class Vertex {
       this.succeeded = true;
     }
   
+    private upgradeScanlineStructureFromArray(): void {
+      // Convert scanlineArr -> scanlineSet + scanlineHeap
+      // (scanlineArr is already unique by construction).
+      const arr = this.scanlineArr;
+      for (let i = 0, len = arr.length; i < len; i++) {
+        const y = arr[i];
+        this.scanlineSet.add(y);
+        this.scanlineHeap.push(y);
+      }
+      arr.length = 0;
+      this.useScanlineArray = false;
+    }
+
     private insertScanline(y: number): void {
+      if (this.useScanlineArray) {
+        const arr = this.scanlineArr;
+        for (let i = 0, len = arr.length; i < len; i++) {
+          if (arr[i] === y) return;
+        }
+        arr.push(y);
+        // Upgrade when scanline count grows beyond "small".
+        // This keeps the small-case win while avoiding O(n) scans for large cases.
+        if (arr.length > 64) this.upgradeScanlineStructureFromArray();
+        return;
+      }
       if (this.scanlineSet.has(y)) return;
       this.scanlineSet.add(y);
       this.scanlineHeap.push(y);
     }
   
     private popScanline(): { success: boolean; y: number } {
+      if (this.useScanlineArray) {
+        const arr = this.scanlineArr;
+        const len = arr.length;
+        if (len === 0) return { success: false, y: 0 };
+        let bestIdx = 0;
+        let bestY = arr[0];
+        for (let i = 1; i < len; i++) {
+          const v = arr[i];
+          if (v > bestY) {
+            bestY = v;
+            bestIdx = i;
+          }
+        }
+        arr[bestIdx] = arr[len - 1];
+        arr.pop();
+        return { success: true, y: bestY };
+      }
       const y = this.scanlineHeap.pop();
       if (y === null) return { success: false, y: 0 };
       this.scanlineSet.delete(y);
@@ -2649,6 +2700,8 @@ export class Vertex {
         if (outrec.owner.splits !== null && 
           this.checkSplitOwner(outrec, outrec.owner.splits)) break; 
         if (outrec.owner.pts !== null && this.checkBounds(outrec.owner) &&
+          // Fast reject: a container must contain the child's bounds.
+          this.containsRect(outrec.owner.bounds, outrec.bounds) &&
           this.path1InsidePath2(outrec.pts!, outrec.owner.pts!)) break;
         outrec.owner = outrec.owner.owner;
       }
