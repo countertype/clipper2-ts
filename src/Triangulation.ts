@@ -13,8 +13,8 @@ import { Point64, Path64, Paths64, InternalClipper } from './Core.js';
 export enum TriangulateResult {
   success,
   fail,
-  no_polygons,
-  paths_intersect
+  noPolygons,
+  pathsIntersect
 }
 
 // -------------------------------------------------------------------------
@@ -85,7 +85,6 @@ export class Delaunay {
     let iPrev: number;
     let iNext: number;
 
-    if (!Delaunay.findLocMinIdx(path, len, i0)) return;
     const foundIdx = Delaunay.findLocMinIdx(path, len, i0);
     if (!foundIdx.found) return;
     i0 = foundIdx.idx;
@@ -665,7 +664,7 @@ export class Delaunay {
     const sol: Paths64 = [];
 
     if (!this.addPaths(paths)) {
-      return { result: TriangulateResult.no_polygons, solution: sol };
+      return { result: TriangulateResult.noPolygons, solution: sol };
     }
 
     // if necessary fix path orientation because the algorithm 
@@ -697,7 +696,7 @@ export class Delaunay {
 
     if (!this.fixupEdgeIntersects()) {
       this.cleanUp();
-      return { result: TriangulateResult.paths_intersect, solution: sol };
+      return { result: TriangulateResult.pathsIntersect, solution: sol };
     }
 
     this.allVertices.sort((a, b) => {
@@ -1012,4 +1011,6 @@ export class Delaunay {
     return dx * dx + dy * dy;
   }
 }
+
+
 

@@ -89,23 +89,23 @@ describe('Triangulation Tests (Point64)', () => {
     }
   });
 
-  it('should return no_polygons for empty input', () => {
+  it('should return noPolygons for empty input', () => {
     const empty: Paths64 = [];
 
     const { result, solution } = Clipper.triangulate(empty);
 
-    expect(result).toBe(TriangulateResult.no_polygons);
+    expect(result).toBe(TriangulateResult.noPolygons);
     expect(solution).toHaveLength(0);
   });
 
-  it('should return no_polygons for degenerate polygon (too few points)', () => {
+  it('should return noPolygons for degenerate polygon (too few points)', () => {
     const degenerate: Paths64 = [
       Clipper.makePath([0, 0, 100, 0]) // Only 2 points
     ];
 
     const { result, solution } = Clipper.triangulate(degenerate);
 
-    expect(result).toBe(TriangulateResult.no_polygons);
+    expect(result).toBe(TriangulateResult.noPolygons);
     expect(solution).toHaveLength(0);
   });
 
@@ -206,12 +206,12 @@ describe('Triangulation Tests (PointD)', () => {
     expect(solution2.length).toBeGreaterThan(0);
   });
 
-  it('should return no_polygons for empty input (PointD)', () => {
+  it('should return noPolygons for empty input (PointD)', () => {
     const empty: PathsD = [];
 
     const { result, solution } = Clipper.triangulateD(empty, 2);
 
-    expect(result).toBe(TriangulateResult.no_polygons);
+    expect(result).toBe(TriangulateResult.noPolygons);
     expect(solution).toHaveLength(0);
   });
 
@@ -240,7 +240,7 @@ describe('Triangulation Edge Cases', () => {
     const { result, solution } = Clipper.triangulate(collinear);
 
     // Should either succeed or handle gracefully
-    expect([TriangulateResult.success, TriangulateResult.no_polygons, TriangulateResult.fail])
+    expect([TriangulateResult.success, TriangulateResult.noPolygons, TriangulateResult.fail])
       .toContain(result);
   });
 
@@ -276,4 +276,6 @@ describe('Triangulation Edge Cases', () => {
     }
   });
 });
+
+
 

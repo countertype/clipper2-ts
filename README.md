@@ -108,13 +108,7 @@ npm test              # Run all tests
 npm test:coverage     # Run with coverage report
 ```
 
-All 258 tests pass, including:
-- 200 polygon clipping tests (matching C# reference implementation)
-- 17 line clipping tests
-- 6 offset tests
-- 18 triangulation tests
-- 5 Z-coordinate callback tests
-- Additional comprehensive and polytree tests
+The test suite validates clipping, offsetting, triangulation, and Z-callbacks against Clipper2's reference implementation. Polygon test 16 (bow-tie) uses relaxed tolerances as this edge case also fails in the C# reference
 
 ## License
 

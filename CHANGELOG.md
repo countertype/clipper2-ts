@@ -2,18 +2,27 @@
 
 All changes to this project will be documented in this file
 
+## [2.0.1] - 2025-12-18
+
+Current as of Clipper2 v2.0.1 ([21ebba0](https://github.com/AngusJohnson/Clipper2/commit/21ebba0))
+
+### Changed
+- Updated to track Clipper2 v2.0.1 (C++ DLL export updates only; no C# library changes)
+
+## [2.0.0] - 2025-12-18
+
+Current as of Clipper2 v2.0.0 ([f39457d](https://github.com/AngusJohnson/Clipper2/commit/f39457d))
+
+### Fixed
+- Fixed `triangulateD` to properly return error status when triangulation fails instead of always returning success
+
+### Changed
+- Updated `TriangulateResult` enum naming to use camelCase: `no_polygons` → `noPolygons`, `paths_intersect` → `pathsIntersect`
+- Removed redundant `findLocMinIdx` call in triangulation path processing
+
 ## [1.5.4-8.578ca4d] - 2025-12-15
 
 Current as of [578ca4d](https://github.com/AngusJohnson/Clipper2/commit/578ca4d)
-
-### Added
-- Glyph benchmark: `benchmarks/glyph-e.bench.ts` to measure union performance on a flattened outline typical of font contours
-
-### Changed
-- `ClipperBase.recursiveCheckOwners`: added bounds containment check before expensive `path1InsidePath2` test for faster polytree construction
-- `ClipperBase` scanline handling: added an adaptive array-backed scanline mode for small `minimaList` workloads, with automatic upgrade to the heap+set path when scanline count grows. This reduces overhead for small glyph-like unions while preserving existing behavior on larger inputs
-
-## [1.5.4-7.578ca4d] - 2025-12-14
 
 ### Added
 - Z-coordinate support: `Point64` and `PointD` now support optional `z` property
@@ -24,6 +33,10 @@ Current as of [578ca4d](https://github.com/AngusJohnson/Clipper2/commit/578ca4d)
   - `triangulateD(paths, decPlaces, useDelaunay)` for floating-point coordinates
   - `TriangulateResult` enum for result status
   - `Delaunay` class for advanced triangulation control
+- Glyph benchmark: `benchmarks/glyph-e.bench.ts` to measure union performance on a flattened outline typical of font contours
+
+### Changed
+- `ClipperBase` scanline handling: added an adaptive array-backed scanline mode for small `minimaList` workloads, with automatic upgrade to the heap+set path when scanline count grows. This reduces overhead for small glyph-like unions while preserving existing behavior on larger inputs
 
 ## [1.5.4-6.9a869ba] - 2025-12-02
 

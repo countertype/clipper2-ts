@@ -1122,7 +1122,12 @@ export namespace Clipper {
     const d = new Delaunay(useDelaunay);
     const { result, solution: sol64 } = d.execute(pp64);
 
-    const solution = scalePathsD(sol64, 1.0 / scale);
+    let solution: PathsD;
+    if (result === TriangulateResult.success) {
+      solution = scalePathsD(sol64, 1.0 / scale);
+    } else {
+      solution = [];
+    }
     return { result, solution };
   }
 }

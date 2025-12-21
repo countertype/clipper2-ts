@@ -2,9 +2,7 @@ import { bench, describe } from 'vitest';
 import { Clipper64, PolyTree64 } from '../src/Engine';
 import { ClipType, FillRule, Path64, Paths64 } from '../src/Core';
 
-// Bench: glyph "e" outline from DrawBot snippet (flattened to polyline)
-// This models a font outline that may include self-intersections and
-// benefits from running through Union to normalize
+// Bench: self intersecting "e" glyph
 
 type Pt = { x: number; y: number };
 
@@ -136,5 +134,10 @@ describe('Glyph: e (flattened outline)', () => {
     }
   });
 });
+
+
+
+
+
 
 
