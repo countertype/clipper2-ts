@@ -4,6 +4,7 @@ package-lock.json
 
 # Build outputs
 dist/
+.gh-pages/
 *.js
 *.js.map
 *.d.ts

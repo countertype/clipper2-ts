@@ -2,6 +2,14 @@
 
 All changes to this project will be documented in this file
 
+## [2.0.1-1]
+
+### Added
+- Interactive examples page with boolean operations, offsetting, triangulation, and Z-callback demos
+
+### Changed
+- Performance: closed-path-only fast paths, reduced object allocation in hot loops
+
 ## [2.0.1] - 2025-12-18
 
 Current as of Clipper2 v2.0.1 ([21ebba0](https://github.com/AngusJohnson/Clipper2/commit/21ebba0))

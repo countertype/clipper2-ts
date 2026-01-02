@@ -1011,6 +1011,3 @@ export class Delaunay {
     return dx * dx + dy * dy;
   }
 }
-
-
-

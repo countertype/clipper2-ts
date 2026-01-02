@@ -266,16 +266,17 @@ export namespace InternalClipper {
     const det = dy1 * dx2 - dy2 * dx1;
     
     if (det === 0.0) {
-      return { intersects: false, point: { x: 0, y: 0, z: 0 } };
+      return { intersects: false, point: { x: 0, y: 0 } };
     }
 
     const t = ((ln1a.x - ln2a.x) * dy2 - (ln1a.y - ln2a.y) * dx2) / det;
     let ip: Point64;
     
     if (t <= 0.0) {
-      ip = { x: ln1a.x, y: ln1a.y, z: 0 };  // Create a copy to avoid mutating original
+      // Create a copy to avoid mutating original.
+      ip = { x: ln1a.x, y: ln1a.y };
     } else if (t >= 1.0) {
-      ip = { x: ln1b.x, y: ln1b.y, z: 0 };  // Create a copy to avoid mutating original
+      ip = { x: ln1b.x, y: ln1b.y };
     } else {
       // avoid using constructor (and rounding too) as they affect performance
       // Use Math.trunc to match C# (long) cast behavior which truncates towards zero
@@ -283,8 +284,7 @@ export namespace InternalClipper {
       const rawY = ln1a.y + t * dy1;
       ip = {
         x: Math.trunc(rawX),
-        y: Math.trunc(rawY),
-        z: 0
+        y: Math.trunc(rawY)
       };
     }
     

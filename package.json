@@ -1,7 +1,7 @@
 {
   "name": "clipper2-ts",
-  "version": "2.0.1",
-  "description": "TypeScript port of Clipper2 polygon clipping and offsetting library",
+  "version": "2.0.1-1",
+  "description": "TypeScript port of Clipper2 polygon clipping, boolean operations, offsetting, and triangulation library",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -15,8 +15,11 @@
     "benchmark": "vitest --run bench",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
+    "serve": "npx serve .",
     "prepublishOnly": "npm run build && npm test",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "predeploy": "npm run build && rm -rf .gh-pages && mkdir -p .gh-pages/dist && cp -r dist/* .gh-pages/dist/ && sed 's|../dist/|./dist/|g' example/index.html > .gh-pages/index.html",
+    "deploy": "gh-pages -d .gh-pages"
   },
   "keywords": [
     "clipper",
@@ -53,6 +56,7 @@
     "@typescript-eslint/parser": "^5.57.0",
     "@vitest/ui": "^4.0.10",
     "eslint": "^8.37.0",
+    "gh-pages": "^6.3.0",
     "typescript": "^5.0.0",
     "vitest": "^4.0.10"
   },

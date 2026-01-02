@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/clipper2-ts.svg)](https://www.npmjs.com/package/clipper2-ts)
 [![license](https://img.shields.io/npm/l/clipper2-ts.svg)](https://github.com/countertype/clipper2-ts/blob/main/LICENSE)
 
-TypeScript port of Angus Johnson's [Clipper2](https://github.com/AngusJohnson/Clipper2) library for polygon clipping and offsetting
+TypeScript port of Angus Johnson's [Clipper2](https://github.com/AngusJohnson/Clipper2) library for polygon clipping, offsetting, and triangulation
 
 ## Installation
 
@@ -41,35 +41,7 @@ const xor = Clipper.xor(subject, clip, FillRule.NonZero);
 const offset = Clipper.inflatePaths(subject, 10, JoinType.Round, EndType.Polygon);
 ```
 
-### Z-coordinate support
-
-Points can optionally carry a Z value (e.g., elevation, layer index, color):
-
-```typescript
-import { Clipper64, ClipType, FillRule, Paths64 } from 'clipper2-ts';
-
-// Create paths with Z values
-const subject: Paths64 = [[
-  { x: 0, y: 0, z: 10 },
-  { x: 100, y: 0, z: 10 },
-  { x: 100, y: 100, z: 20 },
-  { x: 0, y: 100, z: 20 }
-]];
-
-// Set a callback to determine Z for intersection points
-const clipper = new Clipper64();
-clipper.zCallback = (bot1, top1, bot2, top2, intersectPt) => {
-  // Z values may be undefined, use || 0 for safety
-  intersectPt.z = ((bot1.z || 0) + (top1.z || 0) + (bot2.z || 0) + (top2.z || 0)) / 4;
-};
-
-clipper.addSubject(subject);
-// ... add clip paths, execute, etc.
-```
-
-The callback is invoked at each intersection point, receiving the four edge endpoints and the intersection point to modify
-
-### Triangulation (BETA)
+### Triangulation
 
 Convert polygons into triangles using constrained Delaunay triangulation:
 
@@ -93,6 +65,22 @@ if (result === TriangulateResult.success) {
 const { result: resultD, solution: solutionD } = Clipper.triangulateD(polygon, 2);
 ```
 
+### Z-coordinate support
+
+Points can optionally carry a Z value (e.g., elevation, layer index, color). Z callbacks allow you to assign Z values to new vertices created at intersection points. See [Clipper2 Z Docs](https://www.angusj.com/clipper2/Docs/Overview.htm) for details
+
+## Examples
+
+Try the [interactive example](https://countertype.github.io/clipper2-ts/) showing all Clipper2 operations
+
+To run locally:
+
+```bash
+npm install
+npm run serve
+# Then open http://localhost:3000/example/
+```
+
 ## API
 
 This port follows the structure and functionality of Clipper2's C# implementation, with method names adapted to JavaScript conventions. Where C# uses `PascalCase` for methods (`AddPath`, `Execute`), this port uses `camelCase` (`addPath`, `execute`). Class names remain unchanged
@@ -109,6 +97,10 @@ npm test:coverage     # Run with coverage report
 ```
 
 The test suite validates clipping, offsetting, triangulation, and Z-callbacks against Clipper2's reference implementation. Polygon test 16 (bow-tie) uses relaxed tolerances as this edge case also fails in the C# reference
+
+## Peformance 
+
+Faster than JavaScript-based Clipper (Clipper1) ports, slower than Clipper2-WASM; choose based on your contraints
 
 ## License
 
