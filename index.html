@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clipper2</title>
+  <style>
+    :root {
+      --bg-0: #111111;
+      --bg-1: #1c1c1c;
+      --bg-2: #2a2a2a;
+      --bg-canvas: #161616;
+      --border-1: #333333;
+      --grid: rgba(51, 51, 51, 0.5);
+      --text-0: #ededed;
+      --text-1: #888888;
+      --accent: #6bbfff;
+      --accent-hover: #52a3e8;
+      --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --font-mono: "Menlo", "Monaco", "Consolas", "Courier New", monospace;
+      --slider-track: #555;
+      --slider-thumb: #444;
+      --slider-thumb-border: #222;
+    }
+
+    [data-theme="light"] {
+      --bg-0: #fafafa;
+      --bg-1: #ffffff;
+      --bg-2: #f5f5f5;
+      --bg-canvas: #ffffff;
+      --border-1: #e0e0e0;
+      --grid: rgba(0, 0, 0, 0.05);
+      --text-0: #111111;
+      --text-1: #666666;
+      --accent: #0070f3;
+      --accent-hover: #0060df;
+      --slider-track: #d8d8d8;
+      --slider-thumb: #ffffff;
+      --slider-thumb-border: #b8b8b8;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: var(--font-family);
+      background-color: var(--bg-0);
+      color: var(--text-0);
+      margin: 0;
+      padding: 40px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    h1 {
+      font-weight: 500;
+      font-size: 24px;
+      letter-spacing: -0.5px;
+      margin: 0 0 8px 0;
+    }
+
+    .header-subtitle {
+      color: var(--text-1);
+      font-size: 14px;
+      max-width: 384px;
+    }
+
+    .header-subtitle p {
+      margin: 0 0 8px 0;
+    }
+
+    .header-subtitle p:last-child {
+      margin-bottom: 40px;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px solid var(--accent);
+      transition: border-color 0.2s;
+    }
+    
+    a:hover {
+      border-bottom-color: var(--accent);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+      gap: 24px;
+      max-width: 1200px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .card {
+      background: var(--bg-1);
+      border: 1px solid var(--border-1);
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .card-header {
+      padding: 20px;
+      border-bottom: 1px solid var(--border-1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .card-title {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.0em;
+      color: var(--text-1);
+      margin: 0;
+    }
+
+    .canvas-wrapper {
+      background: var(--bg-canvas);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+      min-height: 300px;
+      position: relative;
+    }
+
+    .canvas-wrapper::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-image: 
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+      background-size: 20px 20px;
+      background-position: -1px -1px;
+      opacity: 1;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    canvas {
+      max-width: 100%;
+      max-height: 100%;
+      height: auto;
+      display: block;
+      position: relative;
+      z-index: 1;
+    }
+
+    button {
+        letter-spacing: 0.033em;
+    }
+
+    .controls {
+      display: flex;
+      flex: 1;
+      align-items: center;
+      width: 100%;
+      padding: 20px;
+      border-top: 1px solid var(--border-1);
+      background: var(--bg-1);
+    }
+
+    .btn-group {
+      display: flex;
+      flex: 1;
+      gap: 1px;
+      background: var(--border-1);
+      padding: 1px;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .btn-toggle {
+      flex: 1;
+      background: var(--bg-1);
+      border: none;
+      color: var(--text-1);
+      padding: 10px 12px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-toggle:first-child {
+      border-radius: 5px 0 0 5px;
+    }
+
+    .btn-toggle:last-child {
+      border-radius: 0 5px 5px 0;
+    }
+
+    .btn-toggle:hover {
+      color: var(--text-0);
+      background: var(--bg-2);
+    }
+
+    .btn-toggle.active {
+      background: #181818;
+      color: var(--accent);
+    }
+    
+    [data-theme="light"] .btn-toggle {
+      background: linear-gradient(180deg, #ffffff 0%, #fdfdfd 100%);
+      box-shadow: 
+        inset 0 1px 0 rgba(255,255,255,0.6),
+        inset 0 -1px 0 rgba(0,0,0,0.02);
+    }
+
+    [data-theme="light"] .btn-toggle:hover {
+      background: linear-gradient(180deg, #ffffff 0%, #fdfdfd 100%);
+      box-shadow: 
+        inset 0 1px 0 rgba(255,255,255,0.6),
+        inset 0 -1px 0 rgba(0,0,0,0.02);
+    }
+
+    [data-theme="light"] .btn-toggle.active {
+      background: linear-gradient(180deg, #ffffff 0%, #fdfdfd 100%);
+      box-shadow: 
+        inset 0 1px 0 rgba(255,255,255,0.6),
+        inset 0 -1px 0 rgba(0,0,0,0.02);
+    }
+
+    [data-theme="light"] .btn-action {
+      background: linear-gradient(180deg, #ffffff 0%, #fdfdfd 100%);
+      box-shadow: 
+        inset 0 1px 0 rgba(255,255,255,0.6),
+        inset 0 -1px 0 rgba(0,0,0,0.02);
+    }
+
+    [data-theme="light"] .btn-action:hover {
+      background: linear-gradient(180deg, #ffffff 0%, #fdfdfd 100%);
+      box-shadow: 
+        inset 0 1px 0 rgba(255,255,255,0.6),
+        inset 0 -1px 0 rgba(0,0,0,0.02);
+    }
+
+    .slider-container {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      width: 100%;
+    }
+
+    .slider-label {
+      font-size: 12px;
+      color: var(--text-1);
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      width: 40px;
+    }
+
+    .slider-input-wrapper {
+      flex: 1;
+      display: flex;
+      align-items: center;
+    }
+
+    .slider-value {
+      font-family: var(--font-mono);
+      color: var(--accent);
+      font-size: 13px;
+      width: 40px;
+      text-align: right;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+    }
+
+    input[type=range] {
+      -webkit-appearance: none;
+      width: 100%;
+      background: transparent;
+      height: 24px;
+    }
+
+    input[type=range]:focus {
+      outline: none;
+    }
+
+    input[type=range]::-webkit-slider-runnable-track {
+      width: 100%;
+      height: 1px;
+      cursor: pointer;
+      background: var(--slider-track);
+      border-radius: 0;
+      border: none;
+      box-shadow: none;
+    }
+    
+    input[type=range]::-moz-range-track {
+      width: 100%;
+      height: 1px;
+      cursor: pointer;
+      background: var(--slider-track);
+      border-radius: 0;
+      border: none;
+      box-shadow: none;
+    }
+
+    input[type=range]::-webkit-slider-thumb {
+      height: 18px;
+      width: 18px;
+      border-radius: 50%;
+      background: var(--slider-thumb);
+      cursor: grab;
+      -webkit-appearance: none;
+      margin-top: -8.5px;
+      box-shadow: 
+        0 1px 2px rgba(0,0,0,0.2),
+        inset 0 1px 1px rgba(255,255,255,0.1),
+        inset 0 -1px 1px rgba(0,0,0,0.05);
+      border: 1px solid var(--slider-thumb-border);
+    }
+
+    input[type=range]::-moz-range-thumb {
+      height: 18px;
+      width: 18px;
+      border-radius: 50%;
+      background: var(--slider-thumb);
+      cursor: grab;
+      border: none;
+      box-shadow: 
+        0 1px 2px rgba(0,0,0,0.2),
+        inset 0 1px 1px rgba(255,255,255,0.1),
+        inset 0 -1px 1px rgba(0,0,0,0.05);
+      border: 1px solid var(--slider-thumb-border);
+    }
+
+    input[type=range]:active::-webkit-slider-thumb {
+      cursor: grabbing;
+    }
+
+    input[type=range]:active::-moz-range-thumb {
+      cursor: grabbing;
+    }
+
+    input[type=range]:focus::-webkit-slider-thumb {
+      background: var(--slider-thumb);
+      border-color: var(--slider-thumb-border);
+      box-shadow: 
+        0 1px 2px rgba(0,0,0,0.2),
+        inset 0 1px 1px rgba(255,255,255,0.1),
+        inset 0 -1px 1px rgba(0,0,0,0.05);
+    }
+    
+    input[type=range]:focus::-moz-range-thumb {
+      background: var(--slider-thumb);
+      border-color: var(--slider-thumb-border);
+      box-shadow: 
+        0 1px 2px rgba(0,0,0,0.2),
+        inset 0 1px 1px rgba(255,255,255,0.1),
+        inset 0 -1px 1px rgba(0,0,0,0.05);
+    }
+
+    input[type=range]:focus::-webkit-slider-runnable-track {
+      background: var(--slider-track);
+    }
+    
+    input[type=range]:focus::-moz-range-track {
+      background: var(--slider-track);
+    }
+
+    .btn-action {
+      width: 100%;
+      background: var(--bg-2);
+      border: 1px solid var(--border-1);
+      color: var(--text-1);
+      padding: 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-action:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--bg-2);
+    }
+
+    .btn-action:active {
+      background: var(--bg-2);
+    }
+
+    .header-container {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .theme-toggle {
+      background: var(--bg-1);
+      border: 1px solid var(--border-1);
+      color: var(--text-1);
+      width: 32px;
+      height: 32px;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .theme-toggle:hover {
+      color: var(--accent);
+      border-color: var(--accent);
+      background: var(--bg-2);
+    }
+
+    .theme-icon {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+
+    @media (max-width: 480px) {
+      body {
+        padding: 20px 16px 40px 16px;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+        min-width: 0;
+        gap: 16px;
+      }
+
+      .card {
+        min-width: 0;
+        width: 100%;
+      }
+
+      .header-container {
+        margin-top: 16px;
+        padding-top: 16px;
+        width: 100%;
+      }
+
+      h1 {
+        font-size: 20px;
+      }
+
+      .header-subtitle {
+        font-size: 13px;
+        max-width: 100%;
+      }
+
+      .canvas-wrapper {
+        padding: 10px;
+      }
+
+      canvas {
+        max-width: 100%;
+        width: 100% !important;
+        height: auto !important;
+      }
+
+      .btn-toggle {
+        padding: 8px 6px;
+        font-size: 12px;
+      }
+
+      .slider-label {
+        width: 35px;
+      }
+
+      .slider-value {
+        width: 35px;
+      }
+    }
+
+  </style>
+</head>
+<body>
+
+  <div class="header-container">
+    <div>
+      <h1>Clipper2</h1>
+      <div class="header-subtitle">
+        <p>Polygon clipping, offsetting, and triangulation library, ported to TypeScript from <a href="https://github.com/AngusJohnson/Clipper2">Angus Johnson's Clipper2</a></p>
+        <p>Full <a href="https://www.angusj.com/clipper2/Docs/Overview.htm" target="_blank">docs</a> and TypeScript <a href="https://github.com/countertype/clipper2-ts">repo</a></p>
+      </div>
+    </div>
+    <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">
+      <svg class="theme-icon" viewBox="0 0 24 24" id="icon-sun" style="display: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round;">
+        <circle cx="12" cy="12" r="4"/>
+        <line x1="12" y1="2" x2="12" y2="5"/>
+        <line x1="12" y1="19" x2="12" y2="22"/>
+        <line x1="4.22" y1="4.22" x2="6.34" y2="6.34"/>
+        <line x1="17.66" y1="17.66" x2="19.78" y2="19.78"/>
+        <line x1="2" y1="12" x2="5" y2="12"/>
+        <line x1="19" y1="12" x2="22" y2="12"/>
+        <line x1="4.22" y1="19.78" x2="6.34" y2="17.66"/>
+        <line x1="17.66" y1="6.34" x2="19.78" y2="4.22"/>
+      </svg>
+      <svg class="theme-icon" viewBox="0 0 24 24" id="icon-moon" style="fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round;">
+        <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="grid">
+    
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Boolean operations</h3>
+      </div>
+      <div class="canvas-wrapper">
+        <canvas id="canvas-clipping" width="500" height="500"></canvas>
+      </div>
+      <div class="controls">
+        <div class="btn-group" id="clipping-controls">
+          <button class="btn-toggle active" onclick="updateClipping('Intersection', this)">Intersect</button>
+          <button class="btn-toggle" onclick="updateClipping('Union', this)">Union</button>
+          <button class="btn-toggle" onclick="updateClipping('Difference', this)">Diff</button>
+          <button class="btn-toggle" onclick="updateClipping('Xor', this)">XOR</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Offsetting</h3>
+      </div>
+      <div class="canvas-wrapper">
+        <canvas id="canvas-inflate" width="500" height="500"></canvas>
+      </div>
+      <div class="controls">
+        <div class="slider-container">
+          <span class="slider-label">Offset</span>
+          <div class="slider-input-wrapper">
+            <input type="range" id="inflate-slider" min="-30" max="30" value="0" step="0.5" oninput="updateInflate(this.value)">
+          </div>
+          <span id="inflate-val" class="slider-value">0.0</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Triangulation</h3>
+      </div>
+      <div class="canvas-wrapper">
+        <canvas id="canvas-triangulation" width="700" height="700"></canvas>
+      </div>
+      <div class="controls">
+        <button class="btn-action" onclick="runTriangulation()">Triangulate</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Z callbacks</h3>
+      </div>
+      <div class="canvas-wrapper">
+        <canvas id="canvas-z" width="500" height="500"></canvas>
+      </div>
+      <div class="controls">
+        <button class="btn-action" onclick="runZCallback()">Mark intersections</button>
+      </div>
+    </div>
+
+  </div>
+
+  <footer style="max-width: 1200px; margin: 60px auto 0; padding: 20px 0; color: var(--text-1); font-size: 13px;">
+    TypeScript port maintained by <a href="https://github.com/jpt">Jeremy Tribby</a>
+  </footer>
+
+  <script type="module">
+    import { Clipper, FillRule, ClipType, JoinType, EndType, ClipperD } from './dist/index.js';
+
+    const starSubject = [
+      {x:200, y:100}, {x:20, y:158}, {x:130, y:4}, {x:130, y:196}, {x:20, y:42}
+    ];
+    const starClip = [
+      {x:196, y:126}, {x:8, y:136}, {x:154, y:16}, {x:104, y:200}, {x:38, y:24}
+    ];
+
+    const rabbitPathData = "M88.4,397.4 L82.2,393.7, 78.9,387.5, 79.4,381.0, 81.0,374.6, 85.2,363.5, 66.1,361.1, 63.7,363.3, 61.3,368.0, 56.9,371.0, 49.3,371.5, 26.6,371.0, 11.4,370.0, 3.9,369.0, 0,362.9, 2.4,355.6, 7.1,349.5, 16.9,340.6, 18.7,335.7, 17.2,331.2, 7.5,323.2, 3.3,316.9, 1.5,309.4, 1.3,301.7, 1.7,294.0, 3.2,278.8, 6.3,256.1, 7.7,248.5, 10.9,241.9, 15.3,236.0, 30.1,219.5, 41.0,208.4, 63.6,186.9, 75.3,176.5, 81.5,171.7, 87.8,169.0, 101.6,164.6, 107.9,160.3, 111.1,153.3, 115.7,138.7, 118.5,131.6, 122.2,125.0, 121.0,120.3, 113.1,107.9, 95.8,89.3, 91.8,84.5, 87.7,77.0, 80.1,61.9, 65.6,31.2, 62.4,23.4, 61.1,18.5, 60.4,13.4, 63.3,6.2, 68.1,2.2, 74.0,0.2, 80.2,0, 87.9,1.3, 95.1,4.3, 101.8,8.4, 107.9,13.2, 113.6,18.5, 119.0,24.3, 123.9,30.5, 128.3,37.0, 132.3,43.8, 146.8,71.1, 150.6,77.6, 153.1,70.5, 154.1,62.7, 155.2,47.0, 156.4,39.1, 158.8,31.4, 163.5,18.7, 166.2,12.5, 169.7,6.7, 176.8,5.0, 182.5,9.9, 184.6,17.6, 185.3,25.5, 185.9,41.4, 186.5,75.5, 196.9,77.2, 203.0,79.3, 208.7,82.3, 213.6,86.5, 217.4,91.8, 235.0,123.3, 243.0,135.6, 244.4,141.9, 244.4,148.4, 243.7,154.9, 242.3,161.3, 238.9,167.0, 229.4,176.6, 226.7,182.8, 225.2,188.2, 230.0,203.2, 231.8,211.3, 232.9,219.4, 233.4,227.6, 233.1,235.9, 231.8,244.0, 220.4,282.8, 217.0,298.9, 214.7,315.1, 214.3,322.8, 215.2,330.5, 217.1,338.1, 219.8,345.3, 223.1,352.3, 238.8,380.1, 241.0,387.9, 237.0,392.7, 230.4,393.4, 217.5,393.5, 211.4,393.1, 205.4,391.8, 199.2,389.7, 194.1,385.6, 191,379.8, 184.8,364.6, 158.6,363.2, 138.5,361.7, 130.7,361.4, 129.1,365.6, 125.6,377.7, 127.3,383.6, 128.8,390.4, 128.5,397.2, 123.4,399.6, 117.6,400, 103.6,399.8, 95.3,399.2Z";
+    const coralPathData = "M588.3,259.7 L586.2,269.2, 572.4,287.2, 552.2,303.1, 534.2,310.6, 523.6,310.6, 517.3,308.4, 508.8,304.2, 496.1,300.5, 487.6,303.1, 480.2,315.9, 466.4,357.2, 452.6,408.1, 445.2,432.5, 434.6,452.6, 416.6,470.6, 392.2,487.6, 374.2,504.5, 369.9,514.1, 372.0,524.7, 377.3,531.0, 383.7,534.2, 401.7,535.3, 420.8,531.0, 437.8,523.6, 461.1,506.7, 483.3,481.2, 523.6,418.7, 553.3,369.9, 561.8,363.0, 568.1,364.1, 571.3,367.8, 573.4,386.9, 569.2,407.0, 548.0,450.5, 520.4,490.8, 496.1,522.6, 484.4,535.3, 466.4,546.9, 422.9,568.1, 377.3,583.0, 342.4,589.3, 306.3,588.3, 269.2,584.0, 234.2,576.6, 201.4,562.8, 169.6,539.5, 143.1,510.9, 94.3,448.4, 53.0,410.2, 33.9,390.1, 21.2,366.7, 10.6,327.5, 10.6,309.5, 14.8,303.1, 21.2,298.9, 29.6,300, 36.0,305.3, 43.4,325.4, 49.8,350.8, 59.3,371.0, 92.2,410.2, 110.2,422.9, 119.7,424.0, 127.2,419.7, 136.7,404.9, 134.6,389.0, 124.0,372.0, 108.1,353.0, 69.9,314.8, 55.1,295.7, 44.5,275.6, 37.1,254.4, 36.0,244.8, 41.3,238.5, 48.7,238.5, 55.1,243.8, 64.6,266.0, 75.2,286.2, 81.6,291.5, 87.9,291.5, 93.2,286.2, 95.4,280.9, 92.2,266.0, 68.9,231.0, 45.5,195.0, 42.4,181.2, 44.5,174.9, 49.8,170.6, 59.3,168.5, 66.7,171.7, 80.5,188.6, 102.8,236.3, 111.3,256.5, 115.5,278.7, 126.1,323.3, 163.2,418.7, 170.6,446.2, 178.0,477.0, 188.6,501.4, 197.1,506.7, 206.7,505.6, 217.3,500.3, 224.7,493.9, 230.0,474.9, 225.7,450.5, 215.1,422.9, 172.7,333.9, 164.3,306.3, 154.7,281.9, 140.9,255.4, 111.3,201.4, 100.7,177.0, 95.4,153.7, 98.5,135.6, 103.8,128.2, 113.4,121.9, 124.0,120.8, 133.5,127.2, 140.9,140.9, 144.1,161.1, 147.3,196.1, 153.7,235.3, 160.0,251.2, 167.4,265.0, 178.0,272.4, 191.8,273.4, 203.5,268.1, 210.9,256.5, 213.0,241.6, 212.0,223.6, 196.1,129.3, 188.6,109.1, 169.6,67.8, 162.1,49.8, 160.0,32.8, 164.3,21.2, 174.9,13.7, 186.5,14.8, 193.9,24.3, 202.4,63.6, 209.8,104.9, 218.3,118.7, 231.0,124.0, 239.5,120.8, 244.8,111.3, 255.4,59.3, 260.7,53.0, 269.2,51.9, 281.9,60.4, 286.2,74.2, 285.1,92.2, 278.7,112.3, 259.7,156.8, 246.9,198.2, 232.1,259.7, 225.7,291.5, 222.6,322.2, 220.4,373.1, 224.7,395.4, 230.0,401.7, 238.5,406.0, 246.9,404.9, 253.3,400.7, 262.8,382.6, 274.5,338.1, 281.9,306.3, 286.2,273.4, 293.6,208.8, 311.6,128.2, 310.6,101.7, 306.3,72.0, 306.3,47.7, 310.6,39.2, 320.1,33.9, 333.9,33.9, 341.3,39.2, 345.5,47.7, 346.6,58.3, 346.6,82.6, 348.7,92.2, 355.1,98.5, 366.7,101.7, 379.5,97.5, 387.9,87.9, 392.2,75.2, 397.5,42.4, 400.7,27.5, 406.0,15.9, 417.6,10.6, 434.6,11.6, 442.0,16.9, 445.2,25.4, 440.9,50.8, 430.3,79.5, 424.0,107.0, 419.7,157.9, 422.9,179.1, 428.2,186.5, 435.6,190.8, 444.1,190.8, 450.5,186.5, 460.0,171.7, 466.4,149.4, 474.9,97.5, 481.2,76.3, 489.7,62.5, 496.1,60.4, 504.5,60.9, 516.2,67.8, 521.5,79.5, 521.5,94.3, 518.3,111.3, 506.7,148.4, 491.8,181.2, 479.1,197.1, 460.0,210.9, 446.2,223.6, 444.1,231.0, 446.2,237.4, 451.5,242.7, 459.0,244.8, 477.0,239.5, 513.0,217.3, 527.9,200.3, 540.6,177.0, 553.3,160.0, 559.7,157.9, 567.1,159.0, 572.4,164.3, 574.5,171.7, 570.3,184.4, 517.3,252.2, 512.0,268.1, 513.0,275.6, 517.3,281.9, 524.7,284.0, 533.2,280.9, 552.2,266.0, 571.3,250.1, 578.7,249.1, 584.6,251.7Z M301.0,355.1 L285.1,401.7, 271.3,438.8, 265.0,470.6, 269.2,479.1, 279.8,485.5, 294.7,486.5, 306.3,484.4, 321.2,472.7, 331.8,457.9, 338.1,438.8, 342.4,418.7, 347.7,375.2, 356.1,333.9, 381.6,283.0, 392.2,256.5, 398.5,230.0, 401.7,205.6, 401.7,179.1, 396.4,156.8, 390.1,148.4, 381.6,143.1, 367.8,143.1, 356.1,151.5, 336.0,178.0, 324.3,204.5, 320.1,234.2, 315.9,294.7Z M395.4,308.4 L385.8,328.6, 375.2,373.1, 358.3,426.1, 356.1,450.5, 359.3,459.0, 367.8,463.2, 392.2,459.0, 410.2,448.4, 421.9,431.4, 430.3,411.3, 439.9,363.6, 446.2,339.2, 454.7,316.9, 463.2,298.9, 464.3,287.2, 460.0,279.8, 452.6,276.6, 431.4,279.8, 411.3,290.4Z";
+
+    const Themes = {
+      dark: {
+        ghostStroke: 'rgba(107, 191, 255, 0.2)',
+        ghostFill: 'rgba(255, 255, 255, 0.1)',
+        primaryStroke: '#6bbfff',
+        primaryFill: 'rgba(107, 191, 255, 0.25)',
+        marker: '#6bbfff',
+        triStrokeOpacity: 0.8,
+        triFillOpacity: 0.35,
+        zInteriorStroke: 'rgba(107, 191, 255, 0.3)',
+        zInteriorFill: 'rgba(107, 191, 255, 0.1)'
+      },
+      light: {
+        ghostStroke: 'rgba(0, 112, 243, 0.2)',
+        ghostFill: 'rgba(0, 0, 0, 0.12)',
+        primaryStroke: '#0070f3',
+        primaryFill: 'rgba(0, 112, 243, 0.15)',
+        marker: '#0070f3',
+        triStrokeOpacity: 0.8,
+        triFillOpacity: 0.4,
+        zInteriorStroke: 'rgba(0, 112, 243, 0.3)',
+        zInteriorFill: 'rgba(0, 112, 243, 0.1)'
+      }
+    };
+
+    let currentTheme = localStorage.getItem('theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', currentTheme);
+
+    // Update icon visibility on load
+    if (currentTheme === 'light') {
+      document.getElementById('icon-sun').style.display = 'block';
+      document.getElementById('icon-moon').style.display = 'none';
+    }
+
+    window.toggleTheme = function() {
+      const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', newTheme);
+      currentTheme = newTheme;
+      localStorage.setItem('theme', newTheme);
+      
+      const sun = document.getElementById('icon-sun');
+      const moon = document.getElementById('icon-moon');
+      
+      if (newTheme === 'dark') {
+        sun.style.display = 'none';
+        moon.style.display = 'block';
+      } else {
+        sun.style.display = 'block';
+        moon.style.display = 'none';
+      }
+
+      // Re-render all canvases
+      updateClipping();
+      updateInflate(document.getElementById('inflate-slider').value);
+      
+      // Preserve marker visibility through theme change
+      if (zMarkersVisible) {
+        zMarkersVisible = false;
+        runZCallback(); 
+      } else {
+        initZCanvas();
+      }
+      
+      runTriangulation();
+    };
+
+    function parsePath(pathStr) {
+      const paths = [];
+      const parts = pathStr.split('M').filter(p => p.trim().length > 0);
+      for (const part of parts) {
+        const points = [];
+        const nums = part.replace(/[LZ]/g, ' ').replace(/,/g, ' ').trim().split(/\s+/).map(Number);
+        for (let i = 0; i < nums.length; i += 2) {
+          if (i + 1 < nums.length) {
+            points.push({ x: nums[i], y: nums[i+1] });
+          }
+        }
+        if (points.length > 0) paths.push(points);
+      }
+      return paths;
+    }
+
+    function clearCanvas(canvasId) {
+      const canvas = document.getElementById(canvasId);
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      return { canvas, ctx };
+    }
+
+    function drawPaths(ctx, paths, strokeColor, fillColor, fillRule = 'nonzero') {
+      if (!paths) return;
+      ctx.beginPath();
+      for (const path of paths) {
+        if (path.length === 0) continue;
+        ctx.moveTo(path[0].x, path[0].y);
+        for (let i = 1; i < path.length; i++) {
+          ctx.lineTo(path[i].x, path[i].y);
+        }
+        ctx.closePath();
+      }
+      if (fillColor) {
+        ctx.fillStyle = fillColor;
+        ctx.fill(fillRule);
+      }
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 1.5;
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+
+    function centerPaths(paths, canvasWidth, canvasHeight, scaleFactor = 1.0) {
+      if (!paths || paths.length === 0) return paths;
+      
+      const bounds = Clipper.getBoundsPathsD(paths);
+      const width = bounds.right - bounds.left;
+      const height = bounds.bottom - bounds.top;
+      
+      const padding = 40;
+      const availableWidth = canvasWidth - (padding * 2);
+      const availableHeight = canvasHeight - (padding * 2);
+      
+      let scale = scaleFactor;
+      if (width > availableWidth || height > availableHeight) {
+        scale = Math.min(availableWidth / width, availableHeight / height) * scaleFactor;
+      }
+      
+      let scaledPaths = paths;
+      if (scale !== 1.0) {
+        scaledPaths = Clipper.scalePathsD(paths, scale);
+      }
+      
+      const scaledBounds = Clipper.getBoundsPathsD(scaledPaths);
+      const midX = scaledBounds.left + (scaledBounds.right - scaledBounds.left) / 2;
+      const midY = scaledBounds.top + (scaledBounds.bottom - scaledBounds.top) / 2;
+      
+      const dx = (canvasWidth / 2) - midX;
+      const dy = (canvasHeight / 2) - midY;
+      
+      return Clipper.translatePathsD(scaledPaths, dx, dy);
+    }
+
+    let centeredSubj, centeredClip;
+    let currentClippingOp = 'Intersection';
+
+    window.updateClipping = function(op, btn) {
+      if (btn) {
+        const buttons = document.querySelectorAll('#clipping-controls .btn-toggle');
+        buttons.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      }
+      
+      // Default to current operation
+      if (!op) {
+        op = currentClippingOp;
+      }
+      currentClippingOp = op;
+
+      const { ctx, canvas } = clearCanvas('canvas-clipping');
+      
+      if (!centeredSubj) {
+        const combined = [starSubject, starClip];
+        const bounds = Clipper.getBoundsPathsD(combined);
+        const midX = bounds.left + (bounds.right - bounds.left) / 2;
+        const midY = bounds.top + (bounds.bottom - bounds.top) / 2;
+        const dx = (canvas.width / 2) - midX;
+        const dy = (canvas.height / 2) - midY;
+        
+        centeredSubj = Clipper.translatePathsD([starSubject], dx, dy);
+        centeredClip = Clipper.translatePathsD([starClip], dx, dy);
+      }
+
+      const t = Themes[currentTheme];
+      drawPaths(ctx, centeredSubj, t.ghostStroke, null);
+      drawPaths(ctx, centeredClip, t.ghostFill, null);
+
+      let result;
+      const fillRule = FillRule.NonZero;
+
+      switch (op) {
+        case 'Intersection':
+        case 'Intersect': 
+          result = Clipper.intersectD(centeredSubj, centeredClip, fillRule);
+          break;
+        case 'Union':
+          result = Clipper.unionD(centeredSubj, centeredClip, fillRule);
+          break;
+        case 'Difference':
+        case 'Diff':
+          result = Clipper.differenceD(centeredSubj, centeredClip, fillRule);
+          break;
+        case 'Xor':
+        case 'XOR':
+          result = Clipper.xorD(centeredSubj, centeredClip, fillRule);
+          break;
+      }
+
+      drawPaths(ctx, result, t.primaryStroke, t.primaryFill, 'nonzero');
+    };
+
+    const rawRabbitPaths = parsePath(rabbitPathData);
+    let centeredRabbitPaths;
+
+    window.updateInflate = function(val) {
+      const delta = parseFloat(val);
+      document.getElementById('inflate-val').textContent = delta.toFixed(1);
+
+      const { ctx, canvas } = clearCanvas('canvas-inflate');
+      
+      if (!centeredRabbitPaths) {
+        centeredRabbitPaths = centerPaths(rawRabbitPaths, canvas.width, canvas.height, 0.75);
+      }
+      
+      const t = Themes[currentTheme];
+      drawPaths(ctx, centeredRabbitPaths, t.ghostFill, null, 'nonzero');
+
+      if (delta === 0) {
+        drawPaths(ctx, centeredRabbitPaths, t.primaryStroke, t.primaryFill, 'nonzero');
+        return;
+      }
+
+      const result = Clipper.inflatePathsD(centeredRabbitPaths, delta, JoinType.Round, EndType.Polygon);
+      drawPaths(ctx, result, t.primaryStroke, t.primaryFill, 'nonzero');
+    }
+
+    const selfIntersectingStar = [[
+      {x:100, y:50, z:0}, {x:10, y:79, z:0}, {x:65, y:2, z:0}, 
+      {x:65, y:98, z:0}, {x:10, y:21, z:0}
+    ]];
+    let centeredStar;
+    let zMarkersVisible = false;
+
+    function initZCanvas() {
+      const { ctx, canvas } = clearCanvas('canvas-z');
+      if (!centeredStar) {
+        centeredStar = centerPaths(selfIntersectingStar, canvas.width, canvas.height, 2.0);
+      }
+      
+      const t = Themes[currentTheme];
+      drawPaths(ctx, centeredStar, t.zInteriorStroke, t.zInteriorFill);
+      
+      const outline = Clipper.unionD(centeredStar, FillRule.NonZero);
+      drawPaths(ctx, outline, t.primaryStroke, null);
+    }
+
+    window.runZCallback = function() {
+      // Redraws skip toggle; clicks toggle markers on/off
+      const isRedraw = arguments.length === 0 && window.event?.type !== 'click';
+      if (!isRedraw) {
+        zMarkersVisible = !zMarkersVisible;
+      }
+
+      const { ctx, canvas } = clearCanvas('canvas-z');
+      
+      const t = Themes[currentTheme];
+      
+      drawPaths(ctx, centeredStar, t.zInteriorStroke, t.zInteriorFill);
+      const outline = Clipper.unionD(centeredStar, FillRule.NonZero);
+      drawPaths(ctx, outline, t.primaryStroke, null);
+      
+      if (!zMarkersVisible) return;
+
+      const clipper = new ClipperD(2);
+      clipper.zCallback = (bot1, top1, bot2, top2, pt) => {
+        pt.z = 1;
+      };
+      
+      const solution = [];
+      clipper.addSubjectPaths(centeredStar);
+      clipper.execute(ClipType.Union, FillRule.NonZero, solution);
+      
+      for (const path of solution) {
+        for (const pt of path) {
+          if (pt.z === 1) {
+            ctx.beginPath();
+            ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
+            ctx.fillStyle = t.marker;
+            ctx.fill();
+          }
+        }
+      }
+    };
+
+    const rawCoralPaths = parsePath(coralPathData);
+    let centeredCoralPaths;
+
+    window.runTriangulation = function() {
+      const { ctx, canvas } = clearCanvas('canvas-triangulation');
+      
+      if (!centeredCoralPaths) {
+        centeredCoralPaths = centerPaths(rawCoralPaths, canvas.width, canvas.height, 0.9);
+      }
+      
+      const { result, solution } = Clipper.triangulateD(centeredCoralPaths, 2);
+      
+      const t = Themes[currentTheme];
+
+      for (const tri of solution) {
+        const hue = Math.floor(Math.random() * 25 + 200);
+        const sat = Math.floor(Math.random() * 25 + 55);
+        const light = Math.floor(Math.random() * 20 + 45);
+        
+        const color = `hsla(${hue}, ${sat}%, ${light}%, ${t.triFillOpacity})`;
+        
+        ctx.beginPath();
+        for (const path of [tri]) {
+          if (path.length === 0) continue;
+          ctx.moveTo(path[0].x, path[0].y);
+          for (let i = 1; i < path.length; i++) {
+            ctx.lineTo(path[i].x, path[i].y);
+          }
+          ctx.closePath();
+        }
+        if (color) {
+          ctx.fillStyle = color;
+          ctx.fill('nonzero');
+        }
+        ctx.strokeStyle = t.zInteriorStroke;
+        ctx.lineWidth = 1;
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+      }
+      
+      // Draw outer boundary with thicker stroke
+      ctx.beginPath();
+      for (const path of centeredCoralPaths) {
+        if (path.length === 0) continue;
+        ctx.moveTo(path[0].x, path[0].y);
+        for (let i = 1; i < path.length; i++) {
+          ctx.lineTo(path[i].x, path[i].y);
+        }
+        ctx.closePath();
+      }
+      ctx.strokeStyle = t.primaryStroke;
+      ctx.lineWidth = 2;
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    };
+
+    updateClipping('Intersection');
+    updateInflate(0);
+    initZCanvas();
+    runTriangulation();
+    
+  </script>
+</body>
+</html>
