@@ -98,9 +98,9 @@ npm test:coverage     # Run with coverage report
 
 The test suite validates clipping, offsetting, triangulation, and Z-callbacks against Clipper2's reference implementation. Polygon test 16 (bow-tie) uses relaxed tolerances as this edge case also fails in the C# reference
 
-## Peformance 
+## Performance 
 
-Faster than JavaScript-based Clipper (Clipper1) ports, slower than Clipper2-WASM; choose based on your contraints
+Faster than JavaScript-based Clipper (Clipper1) ports, slower than Clipper2-WASM; choose based on your constraints
 
 ## License
 
