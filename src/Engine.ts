@@ -263,7 +263,7 @@ export namespace ClipperEngine {
         }
       }
       
-      if (prevV?.prev === null) continue;
+      if (prevV?.prev == null) continue;
       if (!isOpen && prevV!.pt.x === v0!.pt.x && prevV!.pt.y === v0!.pt.y) prevV = prevV!.prev;
       prevV!.next = v0;
       v0!.prev = prevV;

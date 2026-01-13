@@ -14,6 +14,27 @@ describe('Polygon Offset Tests', () => {
     expect(solution).toHaveLength(0);
   });
 
+  test('inflatePathsD should not throw on a zero-area ring (all points identical)', () => {
+    const solution = Clipper.inflatePathsD(
+      [
+        [
+          { x: 496.7798371623349, y: 253.05785493587112 },
+          { x: 496.7798371623349, y: 253.05785493587112 },
+          { x: 496.7798371623349, y: 253.05785493587112 },
+          { x: 496.7798371623349, y: 253.05785493587112 },
+        ],
+      ],
+      1.9988052480000003,
+      JoinType.Round,
+      EndType.Polygon,
+      2,
+      8,
+      0
+    );
+
+    expect(solution).toHaveLength(0);
+  });
+
   // Comprehensive offset test using test data
   test('should handle offset test cases from Offsets.txt', () => {
     const testCases = TestDataParser.loadAllTestCases('Offsets.txt');
