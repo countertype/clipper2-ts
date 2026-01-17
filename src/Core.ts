@@ -96,11 +96,67 @@ export namespace InternalClipper {
 
   export const floatingPointTolerance = 1E-12;
   export const defaultMinimumEdgeLength = 0.1;
+  const maxSafeInteger = Number.MAX_SAFE_INTEGER;
+  const maxDeltaForSafeProduct = Math.floor(Math.sqrt(maxSafeInteger));
+  const maxCoordForSafeAreaProduct = Math.floor(maxDeltaForSafeProduct / 2);
+
+  function isSafeProduct(a: number, b: number): boolean {
+    if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b)) return false;
+    if (a === 0 || b === 0) return true;
+    return Math.abs(a) <= maxSafeInteger / Math.abs(b);
+  }
+
+  function isSafeSum(a: number, b: number): boolean {
+    return Math.abs(a) + Math.abs(b) <= maxSafeInteger;
+  }
+
+  function safeMultiplyDifference(a: number, b: number, c: number, d: number): number {
+    if (isSafeProduct(a, b) && isSafeProduct(c, d)) {
+      const prod1 = a * b;
+      const prod2 = c * d;
+      if (isSafeSum(prod1, prod2)) {
+        return prod1 - prod2;
+      }
+    }
+
+    if (Number.isSafeInteger(a) && Number.isSafeInteger(b) &&
+      Number.isSafeInteger(c) && Number.isSafeInteger(d)) {
+      return Number((BigInt(a) * BigInt(b)) - (BigInt(c) * BigInt(d)));
+    }
+
+    return (a * b) - (c * d);
+  }
+
+  function safeMultiplySum(a: number, b: number, c: number, d: number): number {
+    if (isSafeProduct(a, b) && isSafeProduct(c, d)) {
+      const prod1 = a * b;
+      const prod2 = c * d;
+      if (isSafeSum(prod1, prod2)) {
+        return prod1 + prod2;
+      }
+    }
+
+    if (Number.isSafeInteger(a) && Number.isSafeInteger(b) &&
+      Number.isSafeInteger(c) && Number.isSafeInteger(d)) {
+      return Number((BigInt(a) * BigInt(b)) + (BigInt(c) * BigInt(d)));
+    }
+
+    return (a * b) + (c * d);
+  }
 
   export function crossProduct(pt1: Point64, pt2: Point64, pt3: Point64): number {
-    // typecast to avoid potential int overflow
-    return ((pt2.x - pt1.x) * (pt3.y - pt2.y) - 
-            (pt2.y - pt1.y) * (pt3.x - pt2.x));
+    const a = pt2.x - pt1.x;
+    const b = pt3.y - pt2.y;
+    const c = pt2.y - pt1.y;
+    const d = pt3.x - pt2.x;
+
+    // Fast path for typical small coordinates
+    if (Math.abs(a) < maxDeltaForSafeProduct && Math.abs(b) < maxDeltaForSafeProduct &&
+      Math.abs(c) < maxDeltaForSafeProduct && Math.abs(d) < maxDeltaForSafeProduct) {
+      return (a * b) - (c * d);
+    }
+
+    return safeMultiplyDifference(a, b, c, d);
   }
 
   export function crossProductSign(pt1: Point64, pt2: Point64, pt3: Point64): number {
@@ -109,16 +165,16 @@ export namespace InternalClipper {
     const c = pt2.y - pt1.y;
     const d = pt3.x - pt2.x;
 
-    // Fast check for safe integer range (approx 9.4e7)
+    // Fast check for safe integer range
     // Using Math.abs inline allows short-circuiting
-    if (Math.abs(a) < 9e7 && Math.abs(b) < 9e7 && Math.abs(c) < 9e7 && Math.abs(d) < 9e7) {
+    if (Math.abs(a) < maxDeltaForSafeProduct && Math.abs(b) < maxDeltaForSafeProduct &&
+      Math.abs(c) < maxDeltaForSafeProduct && Math.abs(d) < maxDeltaForSafeProduct) {
       const prod1 = a * b;
       const prod2 = c * d;
       return (prod1 > prod2) ? 1 : (prod1 < prod2) ? -1 : 0;
     }
 
-    // Optimization: Check signs first!
-    // This often avoids large number multiplication entirely.
+    // Check signs first to potentially avoid BigInt multiplication
     const signA = (a < 0 ? -1 : (a > 0 ? 1 : 0));
     const signB = (b < 0 ? -1 : (b > 0 ? 1 : 0));
     const signC = (c < 0 ? -1 : (c > 0 ? 1 : 0));
@@ -188,8 +244,9 @@ export namespace InternalClipper {
       return a * b === c * d;
     }
 
-    // Extended fast path for safe integer range (approx 9.4e7)
-    if (absA < 9e7 && absB < 9e7 && absC < 9e7 && absD < 9e7) {
+    // Extended fast path for safe integer range
+    if (absA < maxDeltaForSafeProduct && absB < maxDeltaForSafeProduct &&
+      absC < maxDeltaForSafeProduct && absD < maxDeltaForSafeProduct) {
       return a * b === c * d;
     }
 
@@ -218,9 +275,62 @@ export namespace InternalClipper {
   }
 
   export function dotProduct(pt1: Point64, pt2: Point64, pt3: Point64): number {
-    // typecast to avoid potential int overflow
-    return ((pt2.x - pt1.x) * (pt3.x - pt2.x) + 
-            (pt2.y - pt1.y) * (pt3.y - pt2.y));
+    const a = pt2.x - pt1.x;
+    const b = pt3.x - pt2.x;
+    const c = pt2.y - pt1.y;
+    const d = pt3.y - pt2.y;
+
+    // Fast path for small coordinates
+    if (Math.abs(a) < maxDeltaForSafeProduct && Math.abs(b) < maxDeltaForSafeProduct &&
+      Math.abs(c) < maxDeltaForSafeProduct && Math.abs(d) < maxDeltaForSafeProduct) {
+      return (a * b) + (c * d);
+    }
+
+    return safeMultiplySum(a, b, c, d);
+  }
+
+  export function area(path: Path64): number {
+    // https://en.wikipedia.org/wiki/Shoelace_formula
+    const cnt = path.length;
+    if (cnt < 3) return 0.0;
+
+    // Fast path when coords are small enough that (y1+y2)*(x1-x2) won't overflow
+    // maxCoordForSafeAreaProduct is floor(sqrt(Number.MAX_SAFE_INTEGER) / 2)
+    let allSmall = true;
+    for (let i = 0; i < cnt && allSmall; i++) {
+      const pt = path[i];
+      if (Math.abs(pt.x) >= maxCoordForSafeAreaProduct ||
+        Math.abs(pt.y) >= maxCoordForSafeAreaProduct) {
+        allSmall = false;
+      }
+    }
+
+    let prevPt = path[cnt - 1];
+
+    if (allSmall) {
+      // Fast path - no overflow checks needed
+      let total = 0.0;
+      for (const pt of path) {
+        total += (prevPt.y + pt.y) * (prevPt.x - pt.x);
+        prevPt = pt;
+      }
+      return total * 0.5;
+    }
+
+    // Safe path - use BigInt for accumulation
+    let totalBig = 0n;
+    for (const pt of path) {
+      const sum = prevPt.y + pt.y;
+      const diff = prevPt.x - pt.x;
+      if (Number.isSafeInteger(sum) && Number.isSafeInteger(diff)) {
+        totalBig += BigInt(sum) * BigInt(diff);
+      } else {
+        // Coordinates not safe integers - fall back to float
+        totalBig += BigInt(Math.round(sum * diff));
+      }
+      prevPt = pt;
+    }
+    return Number(totalBig) * 0.5;
   }
 
   export function crossProductD(vec1: PointD, vec2: PointD): number {
@@ -263,13 +373,18 @@ export namespace InternalClipper {
     const dx1 = (ln1b.x - ln1a.x);
     const dy2 = (ln2b.y - ln2a.y);
     const dx2 = (ln2b.x - ln2a.x);
-    const det = dy1 * dx2 - dy2 * dx1;
+    const det = safeMultiplyDifference(dy1, dx2, dy2, dx1);
     
     if (det === 0.0) {
       return { intersects: false, point: { x: 0, y: 0 } };
     }
 
-    const t = ((ln1a.x - ln2a.x) * dy2 - (ln1a.y - ln2a.y) * dx2) / det;
+    const t = safeMultiplyDifference(
+      (ln1a.x - ln2a.x),
+      dy2,
+      (ln1a.y - ln2a.y),
+      dx2
+    ) / det;
     let ip: Point64;
     
     if (t <= 0.0) {
@@ -374,7 +489,8 @@ export namespace InternalClipper {
     
     const dx = (seg2.x - seg1.x);
     const dy = (seg2.y - seg1.y);
-    const q = ((offPt.x - seg1.x) * dx + (offPt.y - seg1.y) * dy) / ((dx * dx) + (dy * dy));
+    const q = safeMultiplySum((offPt.x - seg1.x), dx, (offPt.y - seg1.y), dy) /
+      safeMultiplySum(dx, dx, dy, dy);
     const qClamped = q < 0 ? 0 : (q > 1 ? 1 : q);
     
     return {
