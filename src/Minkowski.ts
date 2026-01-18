@@ -108,8 +108,11 @@ export namespace Minkowski {
   }
 
   function scalePath64(path: PathD, scale: number): Path64 {
+    const maxAbs = InternalClipper.maxSafeCoordinateForScale(scale);
     const result: Path64 = [];
     for (const pt of path) {
+        InternalClipper.checkSafeScaleValue(pt.x, maxAbs, "Minkowski.scalePath64");
+        InternalClipper.checkSafeScaleValue(pt.y, maxAbs, "Minkowski.scalePath64");
         result.push({
           x: InternalClipper.roundToEven(pt.x * scale),
           y: InternalClipper.roundToEven(pt.y * scale)
