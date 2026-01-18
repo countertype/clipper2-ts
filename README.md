@@ -98,6 +98,10 @@ npm test:coverage     # Run with coverage report
 
 The test suite validates clipping, offsetting, triangulation, and Z-callbacks against Clipper2's reference implementation. Polygon test 16 (bow-tie) uses relaxed tolerances as this edge case also fails in the C# reference
 
+## Numeric precision
+
+Coordinates must be [safe integers](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isSafeInteger) (up to 2^53 - 1). Intermediate calculations use BigInt fallback when needed, so large-but-safe inputs work correctly. For floating-point APIs, ensure scaled coordinates (value * 10^precision) stay within this range
+
 ## Performance 
 
 Faster than JavaScript-based Clipper (Clipper1) ports, slower than Clipper2-WASM; choose based on your constraints
