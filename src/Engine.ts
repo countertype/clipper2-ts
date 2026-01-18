@@ -2286,7 +2286,8 @@ protected newOutRec(): OutRec {
     const c = line2.x - line1.x;
     const d = line2.y - line1.y;
     if (c === 0 && d === 0) return 0;
-    return ((a * d - c * b) * (a * d - c * b)) / (c * c + d * d);
+    const cross = InternalClipper.crossProduct(line1, pt, line2);
+    return (cross * cross) / ((c * c) + (d * d));
   }
 
 
@@ -3363,16 +3364,7 @@ export class ClipperD extends ClipperBase {
 // Forward declaration for Clipper class
 export namespace Clipper {
   export function area(path: Path64): number {
-    // https://en.wikipedia.org/wiki/Shoelace_formula
-    let a = 0.0;
-    const cnt = path.length;
-    if (cnt < 3) return 0.0;
-    let prevPt = path[cnt - 1];
-    for (const pt of path) {
-      a += (prevPt.y + pt.y) * (prevPt.x - pt.x);
-      prevPt = pt;
-    }
-    return a * 0.5;
+    return InternalClipper.area(path);
   }
 
   export function areaD(path: PathD): number {
