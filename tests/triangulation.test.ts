@@ -24,6 +24,21 @@ describe('Triangulation Tests (Point64)', () => {
     expect(Math.abs(totalArea - 10000)).toBeLessThan(1);
   });
 
+  it('should triangulate a large-coordinate square', () => {
+    const size = 360_000_000;
+    const square: Paths64 = [
+      Clipper.makePath([0, 0, size, 0, size, size, 0, size])
+    ];
+
+    const { result, solution } = Clipper.triangulate(square);
+
+    expect(result).toBe(TriangulateResult.success);
+    expect(solution).toHaveLength(2);
+    for (const triangle of solution) {
+      expect(triangle).toHaveLength(3);
+    }
+  });
+
   it('should triangulate a simple triangle (returns single triangle)', () => {
     const triangle: Paths64 = [
       Clipper.makePath([0, 0, 100, 0, 50, 100])

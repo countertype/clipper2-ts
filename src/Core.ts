@@ -98,7 +98,28 @@ export namespace InternalClipper {
   export const defaultMinimumEdgeLength = 0.1;
   const maxSafeInteger = Number.MAX_SAFE_INTEGER;
   const maxDeltaForSafeProduct = Math.floor(Math.sqrt(maxSafeInteger));
-  const maxCoordForSafeAreaProduct = Math.floor(maxDeltaForSafeProduct / 2);
+  export const maxCoordForSafeAreaProduct = Math.floor(maxDeltaForSafeProduct / 2);
+
+  export function maxSafeCoordinateForScale(scale: number): number {
+    if (!Number.isFinite(scale)) {
+      throw new RangeError("Scale must be a finite number");
+    }
+    const absScale = Math.abs(scale);
+    if (absScale === 0) return Number.POSITIVE_INFINITY;
+    return maxSafeInteger / absScale;
+  }
+
+  export function checkSafeScaleValue(value: number, maxAbs: number, context: string): void {
+    if (!Number.isFinite(value) || Math.abs(value) > maxAbs) {
+      throw new RangeError(`Scaled coordinate exceeds Number.MAX_SAFE_INTEGER in ${context}`);
+    }
+  }
+
+  export function ensureSafeInteger(value: number, context: string): void {
+    if (!Number.isFinite(value) || Math.abs(value) > maxSafeInteger) {
+      throw new RangeError(`Coordinate exceeds Number.MAX_SAFE_INTEGER in ${context}`);
+    }
+  }
 
   function isSafeProduct(a: number, b: number): boolean {
     if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b)) return false;
@@ -184,10 +205,18 @@ export namespace InternalClipper {
     const signCD = signC * signD;
 
     if (signAB !== signCD) {
-        return signAB > signCD ? 1 : -1;
+      return signAB > signCD ? 1 : -1;
     }
     
     if (signAB === 0) return 0; // both 0 because signs equal
+    
+    if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b) ||
+        !Number.isSafeInteger(c) || !Number.isSafeInteger(d)) {
+      const prod1 = a * b;
+      const prod2 = c * d;
+      if (prod1 === prod2) return 0;
+      return (prod1 > prod2) ? 1 : -1;
+    }
 
     const bigA = BigInt(a);
     const bigB = BigInt(b);
@@ -216,8 +245,8 @@ export namespace InternalClipper {
   }
 
   export interface UInt128Struct {
-    lo64: number;
-    hi64: number;
+    lo64: bigint;
+    hi64: bigint;
   }
 
   export function multiplyUInt64(a: number, b: number): UInt128Struct {
@@ -227,8 +256,8 @@ export namespace InternalClipper {
     const res = aBig * bBig;
     
     return {
-      lo64: Number(res & 0xFFFFFFFFFFFFFFFFn),
-      hi64: Number(res >> 64n)
+      lo64: res & 0xFFFFFFFFFFFFFFFFn,
+      hi64: res >> 64n
     };
   }
 
@@ -255,6 +284,10 @@ export namespace InternalClipper {
     
     if (signAb !== signCd) return false;
     if (signAb === 0) return true;
+    if (!Number.isSafeInteger(absA) || !Number.isSafeInteger(absB) ||
+        !Number.isSafeInteger(absC) || !Number.isSafeInteger(absD)) {
+      return a * b === c * d;
+    }
 
     const bigA = BigInt(absA);
     const bigB = BigInt(absB);
@@ -287,6 +320,29 @@ export namespace InternalClipper {
     }
 
     return safeMultiplySum(a, b, c, d);
+  }
+
+  export function dotProductSign(pt1: Point64, pt2: Point64, pt3: Point64): number {
+    const a = pt2.x - pt1.x;
+    const b = pt3.x - pt2.x;
+    const c = pt2.y - pt1.y;
+    const d = pt3.y - pt2.y;
+
+    if (Math.abs(a) < maxDeltaForSafeProduct && Math.abs(b) < maxDeltaForSafeProduct &&
+      Math.abs(c) < maxDeltaForSafeProduct && Math.abs(d) < maxDeltaForSafeProduct) {
+      const sum = (a * b) + (c * d);
+      return sum > 0 ? 1 : (sum < 0 ? -1 : 0);
+    }
+
+    if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b) ||
+      !Number.isSafeInteger(c) || !Number.isSafeInteger(d)) {
+      const sum = (a * b) + (c * d);
+      return sum > 0 ? 1 : (sum < 0 ? -1 : 0);
+    }
+
+    const bigSum = (BigInt(a) * BigInt(b)) + (BigInt(c) * BigInt(d));
+    if (bigSum === 0n) return 0;
+    return bigSum > 0n ? 1 : -1;
   }
 
   export function area(path: Path64): number {
@@ -324,6 +380,11 @@ export namespace InternalClipper {
       const diff = prevPt.x - pt.x;
       if (Number.isSafeInteger(sum) && Number.isSafeInteger(diff)) {
         totalBig += BigInt(sum) * BigInt(diff);
+      } else if (Number.isSafeInteger(prevPt.y) && Number.isSafeInteger(pt.y) &&
+        Number.isSafeInteger(prevPt.x) && Number.isSafeInteger(pt.x)) {
+        const sumBig = BigInt(prevPt.y) + BigInt(pt.y);
+        const diffBig = BigInt(prevPt.x) - BigInt(pt.x);
+        totalBig += sumBig * diffBig;
       } else {
         // Coordinates not safe integers - fall back to float
         totalBig += BigInt(Math.round(sum * diff));
@@ -446,19 +507,21 @@ export namespace InternalClipper {
     if (!inclusive) {
       // Match C# fast path - use cross product multiplication
       // This avoids floating point equality checks (safer than === 0)
-      return (crossProduct(seg1a, seg2a, seg2b) *
-              crossProduct(seg1b, seg2a, seg2b) < 0) &&
-             (crossProduct(seg2a, seg1a, seg1b) *
-              crossProduct(seg2b, seg1a, seg1b) < 0);
+      const s1 = crossProductSign(seg1a, seg2a, seg2b);
+      const s2 = crossProductSign(seg1b, seg2a, seg2b);
+      const s3 = crossProductSign(seg2a, seg1a, seg1b);
+      const s4 = crossProductSign(seg2b, seg1a, seg1b);
+      return (s1 !== 0 && s2 !== 0 && s1 !== s2) &&
+             (s3 !== 0 && s4 !== 0 && s3 !== s4);
     }
     
     // Inclusive case - match C# implementation
-    const res1 = crossProduct(seg1a, seg2a, seg2b);
-    const res2 = crossProduct(seg1b, seg2a, seg2b);
-    if (res1 * res2 > 0) return false;
-    const res3 = crossProduct(seg2a, seg1a, seg1b);
-    const res4 = crossProduct(seg2b, seg1a, seg1b);
-    if (res3 * res4 > 0) return false;
+    const res1 = crossProductSign(seg1a, seg2a, seg2b);
+    const res2 = crossProductSign(seg1b, seg2a, seg2b);
+    if (res1 !== 0 && res1 === res2) return false;
+    const res3 = crossProductSign(seg2a, seg1a, seg1b);
+    const res4 = crossProductSign(seg2b, seg1a, seg1b);
+    if (res3 !== 0 && res3 === res4) return false;
     // ensure NOT collinear
     return (res1 !== 0 || res2 !== 0 || res3 !== 0 || res4 !== 0);
   }
@@ -590,10 +653,16 @@ export namespace InternalClipper {
     }
     // since path1's location is still equivocal, check its midpoint
     const mp = getBounds(path1);
-    const midPt: Point64 = { 
-      x: Math.round((mp.left + mp.right) / 2), 
-      y: Math.round((mp.top + mp.bottom) / 2) 
-    };
+    let midX: number, midY: number;
+    if (Number.isSafeInteger(mp.left) && Number.isSafeInteger(mp.right) &&
+        Math.abs(mp.left) + Math.abs(mp.right) > Number.MAX_SAFE_INTEGER) {
+      midX = Number((BigInt(mp.left) + BigInt(mp.right)) / 2n);
+      midY = Number((BigInt(mp.top) + BigInt(mp.bottom)) / 2n);
+    } else {
+      midX = Math.round((mp.left + mp.right) / 2);
+      midY = Math.round((mp.top + mp.bottom) / 2);
+    }
+    const midPt: Point64 = { x: midX, y: midY };
     return pointInPolygon(midPt, path2) !== PointInPolygonResult.IsOutside;
   }
 }
@@ -605,6 +674,8 @@ export namespace Point64Utils {
   }
 
   export function fromPointD(pt: PointD): Point64 {
+    InternalClipper.ensureSafeInteger(pt.x, "Point64Utils.fromPointD");
+    InternalClipper.ensureSafeInteger(pt.y, "Point64Utils.fromPointD");
     return { x: Math.round(pt.x), y: Math.round(pt.y), z: pt.z || 0 };
   }
 
@@ -621,6 +692,19 @@ export namespace Point64Utils {
   }
 
   export function add(a: Point64, b: Point64): Point64 {
+    if (Number.isSafeInteger(a.x) && Number.isSafeInteger(b.x) &&
+        Number.isSafeInteger(a.y) && Number.isSafeInteger(b.y)) {
+      const sumX = a.x + b.x;
+      const sumY = a.y + b.y;
+      if (Number.isSafeInteger(sumX) && Number.isSafeInteger(sumY)) {
+        return { x: sumX, y: sumY, z: 0 };
+      }
+      return { 
+        x: Number(BigInt(a.x) + BigInt(b.x)), 
+        y: Number(BigInt(a.y) + BigInt(b.y)), 
+        z: 0 
+      };
+    }
     return { x: a.x + b.x, y: a.y + b.y, z: 0 };
   }
 
@@ -700,6 +784,12 @@ export namespace Rect64Utils {
   }
 
   export function midPoint(rect: Rect64): Point64 {
+    if (Number.isSafeInteger(rect.left) && Number.isSafeInteger(rect.right) &&
+        Math.abs(rect.left) + Math.abs(rect.right) > Number.MAX_SAFE_INTEGER) {
+      const midX = Number((BigInt(rect.left) + BigInt(rect.right)) / 2n);
+      const midY = Number((BigInt(rect.top) + BigInt(rect.bottom)) / 2n);
+      return { x: midX, y: midY };
+    }
     return {
       x: Math.round((rect.left + rect.right) / 2),
       y: Math.round((rect.top + rect.bottom) / 2)

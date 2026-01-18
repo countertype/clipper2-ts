@@ -100,7 +100,11 @@ The test suite validates clipping, offsetting, triangulation, and Z-callbacks ag
 
 ## Numeric precision
 
-Coordinates must be [safe integers](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isSafeInteger) (up to 2^53 - 1). Intermediate calculations use BigInt fallback when needed, so large-but-safe inputs work correctly. For floating-point APIs, ensure scaled coordinates (value * 10^precision) stay within this range
+Coordinate values must be [safe integers](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number/isSafeInteger) (up to 2^53 - 1). This is smaller than the 64-bit range in C# Clipper2, but sufficient for most use cases. Intermediate arithmetic falls back to BigInt when needed to avoid overflow, and internal sign/equality checks use BigInt to avoid precision loss when products exceed the safe range. Values returned as Numbers may still be rounded if they exceed the safe range
+
+For floating-point APIs (`ClipperD`, `inflatePathsD`, etc), ensure your coordinates multiplied by the scale factor (10^precision) stay within the safe range; the library throws a RangeError when scaling would exceed Number.MAX_SAFE_INTEGER
+
+If you have a use case that requires the full 64-bit range, and Clipper2-WASM isn't an option, please open an issue and we can discuss!
 
 ## Performance 
 
