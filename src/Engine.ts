@@ -3079,19 +3079,21 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
   private static areaOutPt(op: OutPt): bigint {
     const maxCoord = InternalClipper.maxCoordForSafeAreaProduct;
     let area = 0.0;
+    let allSmall = true;
     let op2 = op;
     do {
       const prev = op2.prev;
       const pt = op2.pt;
       if (Math.abs(prev.pt.x) >= maxCoord || Math.abs(prev.pt.y) >= maxCoord ||
         Math.abs(pt.x) >= maxCoord || Math.abs(pt.y) >= maxCoord) {
+        allSmall = false;
         break;
       }
       area += (prev.pt.y + pt.y) * (prev.pt.x - pt.x);
       op2 = op2.next!;
     } while (op2 !== op);
 
-    if (op2 === op) {
+    if (allSmall) {
       return BigInt(Math.round(area));
     }
 
