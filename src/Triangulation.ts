@@ -968,6 +968,11 @@ export class Delaunay {
   }
 
   private static segsIntersect(s1a: Point64, s1b: Point64, s2a: Point64, s2b: Point64): IntersectKind {
+    // ignore segments sharing an end-point
+    if ((s1a.x === s2a.x && s1a.y === s2a.y) ||
+        (s1a.x === s2b.x && s1a.y === s2b.y) ||
+        (s1b.x === s2b.x && s1b.y === s2b.y)) return IntersectKind.none;
+
     const dy1 = Number(s1b.y - s1a.y);
     const dx1 = Number(s1b.x - s1a.x);
     const dy2 = Number(s2b.y - s2a.y);
@@ -979,8 +984,8 @@ export class Delaunay {
     let t = (Number(s1a.x - s2a.x) * dy2 -
       Number(s1a.y - s2a.y) * dx2);
 
-    if (t === 0) return IntersectKind.none;
-    if (t > 0) {
+    // nb: testing for t === 0 is unreliable due to float imprecision
+    if (t >= 0) {
       if (cp < 0 || t >= cp) return IntersectKind.none;
     } else {
       if (cp > 0 || t <= cp) return IntersectKind.none;
@@ -989,8 +994,7 @@ export class Delaunay {
     t = (Number(s1a.x - s2a.x) * dy1 -
       Number(s1a.y - s2a.y) * dx1);
 
-    if (t === 0) return IntersectKind.none;
-    if (t > 0) {
+    if (t >= 0) {
       if (cp > 0 && t < cp) return IntersectKind.intersect;
     } else {
       if (cp < 0 && t > cp) return IntersectKind.intersect;
