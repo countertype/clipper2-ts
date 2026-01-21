@@ -2288,13 +2288,22 @@ protected newOutRec(): OutRec {
     const c = line2.x - line1.x;
     const d = line2.y - line1.y;
     if (c === 0 && d === 0) return false;
+    // Fast path: keep within safe integer range
+    const maxCoord = InternalClipper.maxCoordForSafeCrossSq;
+    if (Math.abs(a) < maxCoord && Math.abs(b) < maxCoord &&
+        Math.abs(c) < maxCoord && Math.abs(d) < maxCoord) {
+      const cross = (a * d) - (c * b);
+      return (cross * cross) / ((c * c) + (d * d)) > 0.25;
+    }
+    // Large coordinates: use BigInt for precision
     if (Number.isSafeInteger(a) && Number.isSafeInteger(b) &&
-      Number.isSafeInteger(c) && Number.isSafeInteger(d)) {
+        Number.isSafeInteger(c) && Number.isSafeInteger(d)) {
       const cross = (BigInt(a) * BigInt(d)) - (BigInt(c) * BigInt(b));
       const crossSq = cross * cross;
       const denom = (BigInt(c) * BigInt(c)) + (BigInt(d) * BigInt(d));
       return 4n * crossSq > denom;
     }
+    // Fallback for non-integer coords
     const cross = (a * d) - (c * b);
     return (cross * cross) / ((c * c) + (d * d)) > 0.25;
   }
@@ -3068,25 +3077,21 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
   }
 
   private static areaOutPt(op: OutPt): bigint {
-    let op2 = op;
-    let allSmall = true;
     const maxCoord = InternalClipper.maxCoordForSafeAreaProduct;
+    let area = 0.0;
+    let op2 = op;
     do {
+      const prev = op2.prev;
       const pt = op2.pt;
-      if (Math.abs(pt.x) >= maxCoord || Math.abs(pt.y) >= maxCoord) {
-        allSmall = false;
+      if (Math.abs(prev.pt.x) >= maxCoord || Math.abs(prev.pt.y) >= maxCoord ||
+        Math.abs(pt.x) >= maxCoord || Math.abs(pt.y) >= maxCoord) {
         break;
       }
+      area += (prev.pt.y + pt.y) * (prev.pt.x - pt.x);
       op2 = op2.next!;
     } while (op2 !== op);
 
-    if (allSmall) {
-      let area = 0.0;
-      op2 = op;
-      do {
-        area += (op2.prev.pt.y + op2.pt.y) * (op2.prev.pt.x - op2.pt.x);
-        op2 = op2.next!;
-      } while (op2 !== op);
+    if (op2 === op) {
       return BigInt(Math.round(area));
     }
 

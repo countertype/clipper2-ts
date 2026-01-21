@@ -99,6 +99,8 @@ export namespace InternalClipper {
   const maxSafeInteger = Number.MAX_SAFE_INTEGER;
   const maxDeltaForSafeProduct = Math.floor(Math.sqrt(maxSafeInteger));
   export const maxCoordForSafeAreaProduct = Math.floor(maxDeltaForSafeProduct / 2);
+  // Bound for |a|,|b|,|c|,|d| so cross^2 and denom stay safe
+  export const maxCoordForSafeCrossSq = Math.floor(Math.sqrt(Math.sqrt(maxSafeInteger / 4)));
 
   export function maxSafeCoordinateForScale(scale: number): number {
     if (!Number.isFinite(scale)) {
@@ -171,7 +173,7 @@ export namespace InternalClipper {
     const c = pt2.y - pt1.y;
     const d = pt3.x - pt2.x;
 
-    // Fast path for typical small coordinates
+    // Fast path for small coordinates
     if (Math.abs(a) < maxDeltaForSafeProduct && Math.abs(b) < maxDeltaForSafeProduct &&
       Math.abs(c) < maxDeltaForSafeProduct && Math.abs(d) < maxDeltaForSafeProduct) {
       return (a * b) - (c * d);
