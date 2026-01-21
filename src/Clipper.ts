@@ -263,7 +263,16 @@ export namespace Clipper {
   }
 
   export function area(path: Path64): number {
-    return InternalClipper.area(path);
+    // https://en.wikipedia.org/wiki/Shoelace_formula
+    let a = 0.0;
+    const cnt = path.length;
+    if (cnt < 3) return 0.0;
+    let prevPt = path[cnt - 1];
+    for (const pt of path) {
+      a += (prevPt.y + pt.y) * (prevPt.x - pt.x);
+      prevPt = pt;
+    }
+    return a * 0.5;
   }
 
   export function areaPaths(paths: Paths64): number {
@@ -716,8 +725,7 @@ export namespace Clipper {
     const c = line2.x - line1.x;
     const d = line2.y - line1.y;
     if (c === 0 && d === 0) return 0;
-    const cross = InternalClipper.crossProduct(line1, pt, line2);
-    return sqr(cross) / (c * c + d * d);
+    return sqr(a * d - c * b) / (c * c + d * d);
   }
 
   function rdp(path: Path64, begin: number, end: number, epsSqrd: number, flags: boolean[]): void {

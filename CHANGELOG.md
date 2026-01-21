@@ -2,15 +2,11 @@
 
 All changes to this project will be documented in this file
 
-## [2.0.1-3]
-
-### Changed
-- BigInt fallback for intermediate calculations (cross products, dot products, area) to handle large-but-safe coordinate values correctly
-
 ## [2.0.1-2]
 
 ### Fixed 
 - Fixed crash in `inflatePathsD` when given a zero-area ring — JS optional chaining returns `undefined` vs C#'s `null`, so changed `=== null` to `== null` in `addPathsToVertexList`
+
 
 ## [2.0.1-1]
 

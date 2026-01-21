@@ -685,7 +685,16 @@ export class ClipperOffset {
   }
 
   public static area(path: Path64): number {
-    return InternalClipper.area(path);
+    // https://en.wikipedia.org/wiki/Shoelace_formula
+    let a = 0.0;
+    const cnt = path.length;
+    if (cnt < 3) return 0.0;
+    let prevPt = path[cnt - 1];
+    for (const pt of path) {
+      a += (prevPt.y + pt.y) * (prevPt.x - pt.x);
+      prevPt = pt;
+    }
+    return a * 0.5;
   }
 
   public static sqr(val: number): number {
