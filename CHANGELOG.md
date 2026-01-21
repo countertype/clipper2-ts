@@ -2,11 +2,23 @@
 
 All changes to this project will be documented in this file
 
+## [2.0.1-4]
+
+### Fixed
+- Fixed triangulation failures and infinite loops from upstream issues [#1055](https://github.com/AngusJohnson/Clipper2/issues/1055)/[#1056](https://github.com/AngusJohnson/Clipper2/issues/1056) (shared endpoints and near-collinear segments)
+
+### Changed
+- Rolled back precision safety changes from 2.0.1-3 while evaluating completeness and performance tradeoffs - current draft is happening in [#6](https://github.com/countertype/clipper2-ts/pull/6))
+
+## [2.0.1-3]
+
+### Changed
+- BigInt fallback for intermediate calculations (cross products, dot products, area) to handle large-but-safe coordinate values correctly
+
 ## [2.0.1-2]
 
 ### Fixed 
 - Fixed crash in `inflatePathsD` when given a zero-area ring — JS optional chaining returns `undefined` vs C#'s `null`, so changed `=== null` to `== null` in `addPathsToVertexList`
-
 
 ## [2.0.1-1]
 
@@ -93,14 +105,12 @@ Current as of [578ca4d](https://github.com/AngusJohnson/Clipper2/commit/578ca4d)
 ### Deprecated
 - `createLocalMinima()` function (use `new LocalMinima()` constructor directly for better performance)
 
-
 ## [1.5.4] - 2025-11-08
 
 Current as of [9a869ba](https://github.com/AngusJohnson/Clipper2/commit/9a869ba62a3a4f1eff52f4a19ae64da5d65ac939)
 
 ### Fixed
 - Fixed iterator bug in `checkSplitOwner` that could cause crashes when splits array is modified during recursive iteration (#1029)
-
 
 ## [1.5.4] - 2025-10-25
 
@@ -120,7 +130,6 @@ Current as of [618c05c](https://github.com/AngusJohnson/Clipper2/commit/618c05cb
 - Improved handling of near-collinear points
 - Better precision in edge cases with very large coordinate values
 
-
 ## [1.5.4] - 2025-09-19
 
 Current as of [9741103](https://github.com/AngusJohnson/Clipper2/commit/97411032113572f620b513b9c23a455e7261583d)
@@ -128,7 +137,6 @@ Current as of [9741103](https://github.com/AngusJohnson/Clipper2/commit/97411032
 ### Added
 - Initial TypeScript port of Clipper2 library
 - Includes test suite with test data from original Clipper2
-
 
 ## Notes
 
