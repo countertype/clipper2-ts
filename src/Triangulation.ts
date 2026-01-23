@@ -939,6 +939,28 @@ export class Delaunay {
   }
 
   private static inCircleTest(ptA: Point64, ptB: Point64, ptC: Point64, ptD: Point64): number {
+    const m00 = ptA.x - ptD.x;
+    const m01 = ptA.y - ptD.y;
+    const m10 = ptB.x - ptD.x;
+    const m11 = ptB.y - ptD.y;
+    const m20 = ptC.x - ptD.x;
+    const m21 = ptC.y - ptD.y;
+
+    // Use float math when deltas stay within the safe bound
+    const maxDelta = Math.max(
+      Math.abs(m00), Math.abs(m01),
+      Math.abs(m10), Math.abs(m11),
+      Math.abs(m20), Math.abs(m21)
+    );
+    if (maxDelta < InternalClipper.maxDeltaForInCircle) {
+      const m02 = m00 * m00 + m01 * m01;
+      const m12 = m10 * m10 + m11 * m11;
+      const m22 = m20 * m20 + m21 * m21;
+      return m00 * (m11 * m22 - m21 * m12) -
+        m10 * (m01 * m22 - m21 * m02) +
+        m20 * (m01 * m12 - m11 * m02);
+    }
+
     if (Delaunay.areSafePoints(ptA, ptB, ptC, ptD)) {
       const m00 = BigInt(ptA.x) - BigInt(ptD.x);
       const m01 = BigInt(ptA.y) - BigInt(ptD.y);
@@ -958,16 +980,10 @@ export class Delaunay {
       return Number(result);
     }
 
-    const m00 = ptA.x - ptD.x;
-    const m01 = ptA.y - ptD.y;
     const m02 = m00 * m00 + m01 * m01;
 
-    const m10 = ptB.x - ptD.x;
-    const m11 = ptB.y - ptD.y;
     const m12 = m10 * m10 + m11 * m11;
 
-    const m20 = ptC.x - ptD.x;
-    const m21 = ptC.y - ptD.y;
     const m22 = m20 * m20 + m21 * m21;
 
     return m00 * (m11 * m22 - m21 * m12) -
@@ -975,7 +991,29 @@ export class Delaunay {
       m20 * (m01 * m12 - m11 * m02);
   }
 
+  // Bound for shortestDistFromSegment so cross^2 stays exact in float math
+  private static readonly maxCoordForSegDist = InternalClipper.maxCoordForSafeCrossSq;
+
   private static shortestDistFromSegment(pt: Point64, segPt1: Point64, segPt2: Point64): number {
+    // Use float math when coords stay within the safe bound
+    const maxC = Delaunay.maxCoordForSegDist;
+    if (Math.abs(pt.x) < maxC && Math.abs(pt.y) < maxC &&
+        Math.abs(segPt1.x) < maxC && Math.abs(segPt1.y) < maxC &&
+        Math.abs(segPt2.x) < maxC && Math.abs(segPt2.y) < maxC) {
+      const dx = segPt2.x - segPt1.x;
+      const dy = segPt2.y - segPt1.y;
+      const ax = pt.x - segPt1.x;
+      const ay = pt.y - segPt1.y;
+      const qNum = ax * dx + ay * dy;
+      const denom = dx * dx + dy * dy;
+
+      if (qNum < 0) return Delaunay.distanceSqr(pt, segPt1);
+      if (qNum > denom) return Delaunay.distanceSqr(pt, segPt2);
+
+      const cross = ax * dy - dx * ay;
+      return (cross * cross) / denom;
+    }
+
     if (Delaunay.areSafePoints(pt, segPt1, segPt2)) {
       const dx = BigInt(segPt2.x) - BigInt(segPt1.x);
       const dy = BigInt(segPt2.y) - BigInt(segPt1.y);
@@ -1004,11 +1042,49 @@ export class Delaunay {
     return (ax * dy - dx * ay) * (ax * dy - dx * ay) / denom;
   }
 
+  // Bound for segsIntersect so cross products stay exact in float math
+  private static readonly maxCoordForSegsIntersect = InternalClipper.maxCoordForSafeAreaProduct;
+
   private static segsIntersect(s1a: Point64, s1b: Point64, s2a: Point64, s2b: Point64): IntersectKind {
     // ignore segments sharing an end-point
     if ((s1a.x === s2a.x && s1a.y === s2a.y) ||
         (s1a.x === s2b.x && s1a.y === s2b.y) ||
         (s1b.x === s2b.x && s1b.y === s2b.y)) return IntersectKind.none;
+
+    // Use float math when coords stay within the safe bound
+    const maxC = Delaunay.maxCoordForSegsIntersect;
+    if (Math.abs(s1a.x) < maxC && Math.abs(s1a.y) < maxC &&
+        Math.abs(s1b.x) < maxC && Math.abs(s1b.y) < maxC &&
+        Math.abs(s2a.x) < maxC && Math.abs(s2a.y) < maxC &&
+        Math.abs(s2b.x) < maxC && Math.abs(s2b.y) < maxC) {
+      const dy1 = s1b.y - s1a.y;
+      const dx1 = s1b.x - s1a.x;
+      const dy2 = s2b.y - s2a.y;
+      const dx2 = s2b.x - s2a.x;
+
+      const cp = dy1 * dx2 - dy2 * dx1;
+      if (cp === 0) return IntersectKind.collinear;
+
+      let t = (s1a.x - s2a.x) * dy2 - (s1a.y - s2a.y) * dx2;
+
+      if (t === 0) return IntersectKind.none;
+      if (t > 0) {
+        if (cp < 0 || t >= cp) return IntersectKind.none;
+      } else {
+        if (cp > 0 || t <= cp) return IntersectKind.none;
+      }
+
+      t = (s1a.x - s2a.x) * dy1 - (s1a.y - s2a.y) * dx1;
+
+      if (t === 0) return IntersectKind.none;
+      if (t > 0) {
+        if (cp > 0 && t < cp) return IntersectKind.intersect;
+      } else {
+        if (cp < 0 && t > cp) return IntersectKind.intersect;
+      }
+
+      return IntersectKind.none;
+    }
 
     if (Delaunay.areSafePoints(s1a, s1b, s2a, s2b)) {
       const dy1 = BigInt(s1b.y) - BigInt(s1a.y);

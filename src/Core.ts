@@ -101,6 +101,8 @@ export namespace InternalClipper {
   export const maxCoordForSafeAreaProduct = Math.floor(maxDeltaForSafeProduct / 2);
   // Bound for |a|,|b|,|c|,|d| so cross^2 and denom stay safe
   export const maxCoordForSafeCrossSq = Math.floor(Math.sqrt(Math.sqrt(maxSafeInteger / 4)));
+  // Bound for inCircleTest deltas so 12 * maxDelta^4 stays <= Number.MAX_SAFE_INTEGER
+  export const maxDeltaForInCircle = Math.floor(Math.pow(maxSafeInteger / 12, 0.25));
 
   export function maxSafeCoordinateForScale(scale: number): number {
     if (!Number.isFinite(scale)) {
