@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { Clipper, Clipper64, ClipperBase, InternalClipper, OutPt, OutRec, PointInPolygonResult, Rect64Utils, type Point64, type Rect64 } from '../src';
+import { Clipper, Clipper64, ClipperBase, ClipperD, EndType, InternalClipper, JoinType, OutPt, OutRec, PointInPolygonResult, Rect64Utils, type Point64, type Rect64 } from '../src';
 
 function crossProductBigInt(pt1: Point64, pt2: Point64, pt3: Point64): bigint {
   const a = BigInt(pt2.x - pt1.x);
@@ -384,5 +384,42 @@ describe('InternalClipper precision with large safe integers', () => {
     const huge = Number.MAX_SAFE_INTEGER;
     const path = [{ x: huge, y: 0 }];
     expect(() => Clipper.scalePath64(path, 2)).toThrow(RangeError);
+  });
+
+  test('ClipperD throws when scaling exceeds safe range', () => {
+    const precision = 2;
+    const scale = Math.pow(10, precision);
+    const maxAbs = InternalClipper.maxSafeCoordinateForScale(scale);
+    const tooLarge = maxAbs + 1;
+    const c = new ClipperD(precision);
+    const path = [{ x: tooLarge, y: 0 }, { x: tooLarge + 1, y: 0 }, { x: tooLarge + 1, y: 1 }];
+    expect(() => c.addSubject(path)).toThrow(RangeError);
+  });
+
+  test('ClipperD allows coordinates at safe limit', () => {
+    const precision = 0;
+    const scale = Math.pow(10, precision);
+    const maxAbs = InternalClipper.maxSafeCoordinateForScale(scale);
+    const c = new ClipperD(precision);
+    const path = [
+      { x: maxAbs, y: 0 },
+      { x: maxAbs - 1, y: 1 },
+      { x: maxAbs - 1, y: 0 }
+    ];
+    expect(() => c.addSubject(path)).not.toThrow();
+  });
+
+  test('inflatePathsD throws when scaling exceeds safe range', () => {
+    const precision = 2;
+    const scale = Math.pow(10, precision);
+    const maxAbs = InternalClipper.maxSafeCoordinateForScale(scale);
+    const tooLarge = maxAbs + 1;
+    const paths = [[
+      { x: tooLarge, y: 0 },
+      { x: tooLarge + 1, y: 0 },
+      { x: tooLarge + 1, y: 1 }
+    ]];
+    expect(() => Clipper.inflatePathsD(paths, 1, JoinType.Miter, EndType.Polygon, 2, precision))
+      .toThrow(RangeError);
   });
 });
