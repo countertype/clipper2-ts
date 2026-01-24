@@ -197,39 +197,18 @@ export namespace InternalClipper {
       return (prod1 > prod2) ? 1 : (prod1 < prod2) ? -1 : 0;
     }
 
-    // Check signs first to potentially avoid BigInt multiplication
-    const signA = (a < 0 ? -1 : (a > 0 ? 1 : 0));
-    const signB = (b < 0 ? -1 : (b > 0 ? 1 : 0));
-    const signC = (c < 0 ? -1 : (c > 0 ? 1 : 0));
-    const signD = (d < 0 ? -1 : (d > 0 ? 1 : 0));
-    
-    const signAB = signA * signB;
-    const signCD = signC * signD;
-
-    if (signAB !== signCD) {
-      return signAB > signCD ? 1 : -1;
-    }
-    
-    if (signAB === 0) return 0; // both 0 because signs equal
-    
     if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b) ||
         !Number.isSafeInteger(c) || !Number.isSafeInteger(d)) {
       const prod1 = a * b;
       const prod2 = c * d;
-      if (prod1 === prod2) return 0;
-      return (prod1 > prod2) ? 1 : -1;
+      return (prod1 > prod2) ? 1 : (prod1 < prod2) ? -1 : 0;
     }
 
-    const bigA = BigInt(a);
-    const bigB = BigInt(b);
-    const bigC = BigInt(c);
-    const bigD = BigInt(d);
+    const bigProd1 = BigInt(a) * BigInt(b);
+    const bigProd2 = BigInt(c) * BigInt(d);
 
-    const prod1 = bigA * bigB;
-    const prod2 = bigC * bigD;
-
-    if (prod1 === prod2) return 0;
-    return (prod1 > prod2) ? 1 : -1;
+    if (bigProd1 === bigProd2) return 0;
+    return (bigProd1 > bigProd2) ? 1 : -1;
   }
 
   export function checkPrecision(precision: number): void {
