@@ -415,7 +415,12 @@ export class Delaunay {
 
     if (vertA === null || vertB === null) return;
 
-    if (InternalClipper.crossProductSign(vertA.pt, edge.vL.pt, edge.vR.pt) === 0)
+    const cpsA = InternalClipper.crossProductSign(vertA.pt, edge.vL.pt, edge.vR.pt);
+    if (cpsA === 0)
+      return;
+
+    const cpsB = InternalClipper.crossProductSign(vertB.pt, edge.vL.pt, edge.vR.pt);
+    if (cpsB === 0 || cpsA === cpsB)
       return;
 
     const ictResult = Delaunay.inCircleTest(vertA.pt, edge.vL.pt, edge.vR.pt, vertB.pt);
@@ -931,38 +936,106 @@ export class Delaunay {
     return res;
   }
 
+  private static areSafePoints(...pts: Point64[]): boolean {
+    for (const pt of pts) {
+      if (!Number.isSafeInteger(pt.x) || !Number.isSafeInteger(pt.y)) return false;
+    }
+    return true;
+  }
+
+  private static readonly maxSafeDelta = Math.floor(Math.sqrt(Number.MAX_SAFE_INTEGER / 2));
+
+  private static areSafeDeltas(...vals: number[]): boolean {
+    for (const v of vals) {
+      if (Math.abs(v) > Delaunay.maxSafeDelta) return false;
+    }
+    return true;
+  }
+
   private static inCircleTest(ptA: Point64, ptB: Point64, ptC: Point64, ptD: Point64): number {
-    const m00 = Number(ptA.x - ptD.x);
-    const m01 = Number(ptA.y - ptD.y);
-    const m02 = m00 * m00 + m01 * m01;
+    const ax = ptA.x - ptD.x;
+    const ay = ptA.y - ptD.y;
+    const bx = ptB.x - ptD.x;
+    const by = ptB.y - ptD.y;
+    const cx = ptC.x - ptD.x;
+    const cy = ptC.y - ptD.y;
 
-    const m10 = Number(ptB.x - ptD.x);
-    const m11 = Number(ptB.y - ptD.y);
-    const m12 = m10 * m10 + m11 * m11;
+    const abdet = ax * by - bx * ay;
+    const bcdet = bx * cy - cx * by;
+    const cadet = cx * ay - ax * cy;
 
-    const m20 = Number(ptC.x - ptD.x);
-    const m21 = Number(ptC.y - ptD.y);
-    const m22 = m20 * m20 + m21 * m21;
+    const alift = ax * ax + ay * ay;
+    const blift = bx * bx + by * by;
+    const clift = cx * cx + cy * cy;
 
-    return m00 * (m11 * m22 - m21 * m12) -
-      m10 * (m01 * m22 - m21 * m02) +
-      m20 * (m01 * m12 - m11 * m02);
+    const det = alift * bcdet + blift * cadet + clift * abdet;
+    const permanent = Math.abs(alift * bcdet) + Math.abs(blift * cadet) + Math.abs(clift * abdet);
+
+    // Error bound from Shewchuk's "Adaptive Precision Floating-Point Arithmetic
+    // and Fast Robust Geometric Predicates" (iccerrboundA for 2D in-circle test).
+    // See: https://www.cs.cmu.edu/~quake/robust.html
+    const eps = Number.EPSILON;
+    const errbound = (10 + 96 * eps) * eps * permanent;
+
+    if (det > errbound) return 1;
+    if (-det > errbound) return -1;
+
+    if (Delaunay.areSafePoints(ptA, ptB, ptC, ptD)) {
+      const ax = BigInt(ptA.x) - BigInt(ptD.x);
+      const ay = BigInt(ptA.y) - BigInt(ptD.y);
+      const bx = BigInt(ptB.x) - BigInt(ptD.x);
+      const by = BigInt(ptB.y) - BigInt(ptD.y);
+      const cx = BigInt(ptC.x) - BigInt(ptD.x);
+      const cy = BigInt(ptC.y) - BigInt(ptD.y);
+
+      const abdet = ax * by - bx * ay;
+      const bcdet = bx * cy - cx * by;
+      const cadet = cx * ay - ax * cy;
+
+      const alift = ax * ax + ay * ay;
+      const blift = bx * bx + by * by;
+      const clift = cx * cx + cy * cy;
+
+      const result = alift * bcdet + blift * cadet + clift * abdet;
+      if (result > 0n) return 1;
+      if (result < 0n) return -1;
+      return 0;
+    }
+
+    return det > 0 ? 1 : det < 0 ? -1 : 0;
   }
 
   private static shortestDistFromSegment(pt: Point64, segPt1: Point64, segPt2: Point64): number {
-    const dx = Number(segPt2.x - segPt1.x);
-    const dy = Number(segPt2.y - segPt1.y);
-
-    const ax = Number(pt.x - segPt1.x);
-    const ay = Number(pt.y - segPt1.y);
-
+    const dx = segPt2.x - segPt1.x;
+    const dy = segPt2.y - segPt1.y;
+    const ax = pt.x - segPt1.x;
+    const ay = pt.y - segPt1.y;
     const qNum = ax * dx + ay * dy;
     const denom = dx * dx + dy * dy;
 
-    if (qNum < 0)
-      return Delaunay.distanceSqr(pt, segPt1);
-    if (qNum > denom)
-      return Delaunay.distanceSqr(pt, segPt2);
+    if (Delaunay.areSafeDeltas(dx, dy, ax, ay)) {
+      if (qNum < 0) return Delaunay.distanceSqr(pt, segPt1);
+      if (qNum > denom) return Delaunay.distanceSqr(pt, segPt2);
+      return (ax * dy - dx * ay) * (ax * dy - dx * ay) / denom;
+    }
+
+    if (Delaunay.areSafePoints(pt, segPt1, segPt2)) {
+      const dx = BigInt(segPt2.x) - BigInt(segPt1.x);
+      const dy = BigInt(segPt2.y) - BigInt(segPt1.y);
+      const ax = BigInt(pt.x) - BigInt(segPt1.x);
+      const ay = BigInt(pt.y) - BigInt(segPt1.y);
+      const qNum = ax * dx + ay * dy;
+      const denom = dx * dx + dy * dy;
+
+      if (qNum < 0n) return Delaunay.distanceSqr(pt, segPt1);
+      if (qNum > denom) return Delaunay.distanceSqr(pt, segPt2);
+
+      const cross = ax * dy - dx * ay;
+      return Number(cross * cross) / Number(denom);
+    }
+
+    if (qNum < 0) return Delaunay.distanceSqr(pt, segPt1);
+    if (qNum > denom) return Delaunay.distanceSqr(pt, segPt2);
 
     return (ax * dy - dx * ay) * (ax * dy - dx * ay) / denom;
   }
@@ -973,16 +1046,73 @@ export class Delaunay {
         (s1a.x === s2b.x && s1a.y === s2b.y) ||
         (s1b.x === s2b.x && s1b.y === s2b.y)) return IntersectKind.none;
 
-    const dy1 = Number(s1b.y - s1a.y);
-    const dx1 = Number(s1b.x - s1a.x);
-    const dy2 = Number(s2b.y - s2a.y);
-    const dx2 = Number(s2b.x - s2a.x);
+    const dy1 = s1b.y - s1a.y;
+    const dx1 = s1b.x - s1a.x;
+    const dy2 = s2b.y - s2a.y;
+    const dx2 = s2b.x - s2a.x;
+    const dxs = s1a.x - s2a.x;
+    const dys = s1a.y - s2a.y;
+
+    if (Delaunay.areSafeDeltas(dy1, dx1, dy2, dx2, dxs, dys)) {
+      const cp = dy1 * dx2 - dy2 * dx1;
+      if (cp === 0) return IntersectKind.collinear;
+
+      let t = dxs * dy2 - dys * dx2;
+
+      // nb: testing for t === 0 is unreliable due to float imprecision
+      if (t >= 0) {
+        if (cp < 0 || t >= cp) return IntersectKind.none;
+      } else {
+        if (cp > 0 || t <= cp) return IntersectKind.none;
+      }
+
+      t = dxs * dy1 - dys * dx1;
+
+      if (t >= 0) {
+        if (cp > 0 && t < cp) return IntersectKind.intersect;
+      } else {
+        if (cp < 0 && t > cp) return IntersectKind.intersect;
+      }
+
+      return IntersectKind.none;
+    }
+
+    if (Delaunay.areSafePoints(s1a, s1b, s2a, s2b)) {
+      const dy1 = BigInt(s1b.y) - BigInt(s1a.y);
+      const dx1 = BigInt(s1b.x) - BigInt(s1a.x);
+      const dy2 = BigInt(s2b.y) - BigInt(s2a.y);
+      const dx2 = BigInt(s2b.x) - BigInt(s2a.x);
+
+      const cp = dy1 * dx2 - dy2 * dx1;
+      if (cp === 0n) return IntersectKind.collinear;
+
+      let t = (BigInt(s1a.x) - BigInt(s2a.x)) * dy2 -
+        (BigInt(s1a.y) - BigInt(s2a.y)) * dx2;
+
+      if (t === 0n) return IntersectKind.none;
+      if (t > 0n) {
+        if (cp < 0n || t >= cp) return IntersectKind.none;
+      } else {
+        if (cp > 0n || t <= cp) return IntersectKind.none;
+      }
+
+      t = (BigInt(s1a.x) - BigInt(s2a.x)) * dy1 -
+        (BigInt(s1a.y) - BigInt(s2a.y)) * dx1;
+
+      if (t === 0n) return IntersectKind.none;
+      if (t > 0n) {
+        if (cp > 0n && t < cp) return IntersectKind.intersect;
+      } else {
+        if (cp < 0n && t > cp) return IntersectKind.intersect;
+      }
+
+      return IntersectKind.none;
+    }
 
     const cp = dy1 * dx2 - dy2 * dx1;
     if (cp === 0) return IntersectKind.collinear;
 
-    let t = (Number(s1a.x - s2a.x) * dy2 -
-      Number(s1a.y - s2a.y) * dx2);
+    let t = dxs * dy2 - dys * dx2;
 
     // nb: testing for t === 0 is unreliable due to float imprecision
     if (t >= 0) {
@@ -991,8 +1121,7 @@ export class Delaunay {
       if (cp > 0 || t <= cp) return IntersectKind.none;
     }
 
-    t = (Number(s1a.x - s2a.x) * dy1 -
-      Number(s1a.y - s2a.y) * dx1);
+    t = dxs * dy1 - dys * dx1;
 
     if (t >= 0) {
       if (cp > 0 && t < cp) return IntersectKind.intersect;
@@ -1004,14 +1133,24 @@ export class Delaunay {
   }
 
   private static distSqr(pt1: Point64, pt2: Point64): number {
-    const dx = Number(pt1.x - pt2.x);
-    const dy = Number(pt1.y - pt2.y);
-    return dx * dx + dy * dy;
+    return Delaunay.distanceSqr(pt1, pt2);
   }
 
   private static distanceSqr(a: Point64, b: Point64): number {
-    const dx = Number(a.x - b.x);
-    const dy = Number(a.y - b.y);
+    const dx = a.x - b.x;
+    const dy = a.y - b.y;
+
+    if (Delaunay.areSafeDeltas(dx, dy)) {
+      const dist = dx * dx + dy * dy;
+      if (dist <= Number.MAX_SAFE_INTEGER) return dist;
+    }
+
+    if (Delaunay.areSafePoints(a, b)) {
+      const dxBig = BigInt(a.x) - BigInt(b.x);
+      const dyBig = BigInt(a.y) - BigInt(b.y);
+      return Number(dxBig * dxBig + dyBig * dyBig);
+    }
+
     return dx * dx + dy * dy;
   }
 }
