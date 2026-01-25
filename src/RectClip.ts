@@ -110,7 +110,7 @@ export class RectClip64 {
     rectMidPoint: Point64
   ): boolean {
     if (RectClip64.areOpposites(prev, curr)) {
-      return InternalClipper.crossProduct(prevPt, rectMidPoint, currPt) < 0;
+      return InternalClipper.crossProductSign(prevPt, rectMidPoint, currPt) < 0;
     }
     return RectClip64.headingClockwise(prev, curr);
   }
@@ -240,8 +240,8 @@ export class RectClip64 {
   }
 
   private static getSegmentIntersection(p1: Point64, p2: Point64, p3: Point64, p4: Point64): { intersects: boolean; point: Point64 } {
-    const res1 = InternalClipper.crossProduct(p1, p3, p4);
-    const res2 = InternalClipper.crossProduct(p2, p3, p4);
+    const res1 = InternalClipper.crossProductSign(p1, p3, p4);
+    const res2 = InternalClipper.crossProductSign(p2, p3, p4);
     
     if (res1 === 0) {
       const ip = p1;
@@ -262,12 +262,12 @@ export class RectClip64 {
       return { intersects: (p2.y > p3.y) === (p2.y < p4.y), point: ip };
     }
     
-    if ((res1 > 0) === (res2 > 0)) {
+    if (res1 === res2) {
       return { intersects: false, point: { x: 0, y: 0 } };
     }
 
-    const res3 = InternalClipper.crossProduct(p3, p1, p2);
-    const res4 = InternalClipper.crossProduct(p4, p1, p2);
+    const res3 = InternalClipper.crossProductSign(p3, p1, p2);
+    const res4 = InternalClipper.crossProductSign(p4, p1, p2);
     
     if (res3 === 0) {
       const ip = p3;
@@ -287,7 +287,7 @@ export class RectClip64 {
       return { intersects: (p4.y > p1.y) === (p4.y < p2.y), point: ip };
     }
     
-    if ((res3 > 0) === (res4 > 0)) {
+    if (res3 === res4) {
       return { intersects: false, point: { x: 0, y: 0 } };
     }
 
