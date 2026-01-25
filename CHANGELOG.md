@@ -2,6 +2,11 @@
 
 All changes to this project will be documented in this file
 
+## [2.0.1-5]
+
+### Fixed
+- Precision safety for large coordinates: BigInt fallback for intermediate calculations to prevent overflow beyond `MAX_SAFE_INTEGER`, with runtime errors when inputs exceed safe bounds ([#6](https://github.com/countertype/clipper2-ts/pull/6))
+
 ## [2.0.1-4]
 
 ### Fixed
