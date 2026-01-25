@@ -8,7 +8,7 @@ All changes to this project will be documented in this file
 - Fixed triangulation failures and infinite loops from upstream issues [#1055](https://github.com/AngusJohnson/Clipper2/issues/1055)/[#1056](https://github.com/AngusJohnson/Clipper2/issues/1056) (shared endpoints and near-collinear segments)
 
 ### Changed
-- Rolled back precision safety changes from 2.0.1-3 while evaluating completeness and performance tradeoffs - current draft is happening in [#6](https://github.com/countertype/clipper2-ts/pull/6))
+- Rolled back precision safety changes from 2.0.1-3 while evaluating completeness and performance tradeoffs - current draft is happening in [#6](https://github.com/countertype/clipper2-ts/pull/6)
 
 ## [2.0.1-3]
 

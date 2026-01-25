@@ -263,16 +263,7 @@ export namespace Clipper {
   }
 
   export function area(path: Path64): number {
-    // https://en.wikipedia.org/wiki/Shoelace_formula
-    let a = 0.0;
-    const cnt = path.length;
-    if (cnt < 3) return 0.0;
-    let prevPt = path[cnt - 1];
-    for (const pt of path) {
-      a += (prevPt.y + pt.y) * (prevPt.x - pt.x);
-      prevPt = pt;
-    }
-    return a * 0.5;
+    return InternalClipper.area(path);
   }
 
   export function areaPaths(paths: Paths64): number {
@@ -366,6 +357,11 @@ export namespace Clipper {
   }
 
   export function scaleRect(rec: RectD, scale: number): Rect64 {
+    const maxAbs = InternalClipper.maxSafeCoordinateForScale(scale);
+    InternalClipper.checkSafeScaleValue(rec.left, maxAbs, "scaleRect");
+    InternalClipper.checkSafeScaleValue(rec.top, maxAbs, "scaleRect");
+    InternalClipper.checkSafeScaleValue(rec.right, maxAbs, "scaleRect");
+    InternalClipper.checkSafeScaleValue(rec.bottom, maxAbs, "scaleRect");
     return {
       left: Math.round(rec.left * scale),
       top: Math.round(rec.top * scale),
@@ -415,8 +411,11 @@ export namespace Clipper {
 
   // Unlike ScalePath, both ScalePath64 & ScalePathD also involve type conversion
   export function scalePath64(path: PathD, scale: number): Path64 {
+    const maxAbs = InternalClipper.maxSafeCoordinateForScale(scale);
     const result: Path64 = [];
     for (const pt of path) {
+      InternalClipper.checkSafeScaleValue(pt.x, maxAbs, "scalePath64");
+      InternalClipper.checkSafeScaleValue(pt.y, maxAbs, "scalePath64");
       result.push({
         x: Math.round(pt.x * scale),
         y: Math.round(pt.y * scale)
@@ -607,10 +606,34 @@ export namespace Clipper {
   }
 
   export function distanceSqr(pt1: Point64, pt2: Point64): number {
-    return sqr(pt1.x - pt2.x) + sqr(pt1.y - pt2.y);
+    const dx = pt1.x - pt2.x;
+    const dy = pt1.y - pt2.y;
+    
+    if (Number.isSafeInteger(dx) && Number.isSafeInteger(dy)) {
+      const dxAbs = Math.abs(dx);
+      const dyAbs = Math.abs(dy);
+      const maxDelta = InternalClipper.maxCoordForSafeAreaProduct * 2; // maxDeltaForSafeProduct
+      if (dxAbs <= maxDelta && dyAbs <= maxDelta) {
+        const dist = dx * dx + dy * dy;
+        if (dist <= Number.MAX_SAFE_INTEGER) return dist;
+      }
+      const dxSq = BigInt(dx) * BigInt(dx);
+      const dySq = BigInt(dy) * BigInt(dy);
+      return Number(dxSq + dySq);
+    }
+    return sqr(dx) + sqr(dy);
   }
 
   export function midPoint(pt1: Point64, pt2: Point64): Point64 {
+    if (Number.isSafeInteger(pt1.x) && Number.isSafeInteger(pt2.x) &&
+        Number.isSafeInteger(pt1.y) && Number.isSafeInteger(pt2.y) &&
+        (Math.abs(pt1.x) + Math.abs(pt2.x) > Number.MAX_SAFE_INTEGER ||
+         Math.abs(pt1.y) + Math.abs(pt2.y) > Number.MAX_SAFE_INTEGER)) {
+      return { 
+        x: Number((BigInt(pt1.x) + BigInt(pt2.x)) / 2n),
+        y: Number((BigInt(pt1.y) + BigInt(pt2.y)) / 2n)
+      };
+    }
     return { x: Math.round((pt1.x + pt2.x) / 2), y: Math.round((pt1.y + pt2.y) / 2) };
   }
 
@@ -725,7 +748,17 @@ export namespace Clipper {
     const c = line2.x - line1.x;
     const d = line2.y - line1.y;
     if (c === 0 && d === 0) return 0;
-    return sqr(a * d - c * b) / (c * c + d * d);
+    
+    if (Number.isSafeInteger(a) && Number.isSafeInteger(b) &&
+        Number.isSafeInteger(c) && Number.isSafeInteger(d)) {
+      const cross = (BigInt(a) * BigInt(d)) - (BigInt(c) * BigInt(b));
+      const crossSq = cross * cross;
+      const denom = (BigInt(c) * BigInt(c)) + (BigInt(d) * BigInt(d));
+      return Number(crossSq) / Number(denom);
+    }
+
+    const cross = InternalClipper.crossProduct(line1, pt, line2);
+    return sqr(cross) / (c * c + d * d);
   }
 
   function rdp(path: Path64, begin: number, end: number, epsSqrd: number, flags: boolean[]): void {
@@ -1050,6 +1083,9 @@ export namespace Clipper {
   export function pointInPolygonD(pt: PointD, polygon: PathD, precision: number = 2): PointInPolygonResult {
     InternalClipper.checkPrecision(precision);
     const scale = Math.pow(10, precision);
+    const maxAbs = InternalClipper.maxSafeCoordinateForScale(scale);
+    InternalClipper.checkSafeScaleValue(pt.x, maxAbs, "pointInPolygonD");
+    InternalClipper.checkSafeScaleValue(pt.y, maxAbs, "pointInPolygonD");
     const p = Point64Utils.fromPointD(PointDUtils.scale(pt, scale));
     const pathScaled = scalePath64(polygon, scale);
     return InternalClipper.pointInPolygon(p, pathScaled);
