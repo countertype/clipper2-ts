@@ -86,12 +86,10 @@ export {
 } from './Triangulation.js';
 
 // Export main Clipper namespace with convenience functions
-export { Clipper } from './Clipper.js';
+export * as Clipper from './Clipper.js';
 
 // Re-export main functions for convenience
-import { Clipper } from './Clipper.js';
-
-export const {
+export {
   intersect,
   intersectD,
   union,
@@ -153,4 +151,4 @@ export const {
   ramerDouglasPeuckerPathsD,
   triangulate,
   triangulateD
-} = Clipper;
+} from './Clipper.js';
