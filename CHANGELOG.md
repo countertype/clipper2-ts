@@ -2,6 +2,17 @@
 
 All changes to this project will be documented in this file
 
+## [2.0.1-7]
+
+### Fixed
+- Triangulation: stabilized Delaunay flip handling to prevent flip oscillations in edge-case inputs
+
+### Changed
+- Triangulation: added a safe-math pre-scan for speed when coordinates stay within safe integer range
+
+### Added
+- Triangulation: expanded test coverage for failure cases and edge conditions
+
 ## [2.0.1-6]
 
 ### Changed
