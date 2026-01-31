@@ -8,10 +8,10 @@
 *******************************************************************************/
 
 import {
-    Point64, PointD, Path64, PathD, Paths64, PathsD, Rect64, RectD,
+    Point64, Path64, PathD, Paths64, PathsD, Rect64,
     ClipType, PathType, FillRule, PointInPolygonResult,
     ZCallback64, ZCallbackD,
-    InternalClipper, Point64Utils, Rect64Utils, PointDUtils, RectDUtils
+    InternalClipper, Rect64Utils
   } from './Core.js';
 
 // Vertex: a pre-clipping data structure. It is used to separate polygons
@@ -2143,11 +2143,12 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
                 this.fillrule === FillRule.Negative ? ae.windCount2 >= 0 :
                 ae.windCount2 === 0;
 
-      case ClipType.Difference:
+      case ClipType.Difference: {
         const result = this.fillrule === FillRule.Positive ? (ae.windCount2 <= 0) :
                         this.fillrule === FillRule.Negative ? (ae.windCount2 >= 0) :
                         (ae.windCount2 === 0);
         return (ClipperBase.getPolyType(ae) === PathType.Subject) ? result : !result;
+      }
 
       case ClipType.Xor:
         return true; // XOr is always contributing unless open

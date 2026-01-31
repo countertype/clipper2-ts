@@ -8,7 +8,7 @@
 *******************************************************************************/
 
 import {
-  Point64, PointD, Path64, PathD, Paths64, PathsD,
+  Point64, PointD, Path64, PathD, Paths64,
   ClipType, FillRule,
   Point64Utils, PointDUtils, InternalClipper
 } from './Core.js';
@@ -242,7 +242,7 @@ export class ClipperOffset {
   public static getLowestPathInfo(paths: Paths64): { idx: number; isNegArea: boolean } {
     let idx = -1;
     let isNegArea = false;
-    let botPt: Point64 = { x: Number.MAX_SAFE_INTEGER, y: Number.MIN_SAFE_INTEGER };
+    const botPt: Point64 = { x: Number.MAX_SAFE_INTEGER, y: Number.MIN_SAFE_INTEGER };
     
     for (let i = 0; i < paths.length; ++i) {
       let a = Number.MAX_VALUE;
