@@ -552,7 +552,7 @@ describe('Issue #1058 - Infinite loop in triangulation', () => {
 
     const poly2 = Clipper.union(poly1, FillRule.NonZero);
     
-    // With Delaunay disabled, should not have the infinite loop issue
+    // Delaunay off to isolate ear clipping path
     const { result, solution } = Clipper.triangulate(poly2, false);
     
     expect([TriangulateResult.success, TriangulateResult.fail, TriangulateResult.noPolygons, TriangulateResult.pathsIntersect])
@@ -689,5 +689,273 @@ describe('Delaunay Correctness', () => {
     expect(result).toBe(TriangulateResult.success);
     const { violations } = checkDelaunayProperty(solution, poly2);
     expect(violations).toBe(0);
+  }, 10000);
+});
+
+describe('Triangulation Precision Edge Cases', () => {
+  // Near-cocircular quad stresses inCircle error bound
+  it('should handle near-cocircular points correctly', () => {
+    const nearCocircular: Paths64 = [
+      Clipper.makePath([
+        0, 0,
+        1000000, 1,  // Almost collinear with next
+        1000000, 1000000,
+        1, 1000000
+      ])
+    ];
+
+    const { result, solution } = Clipper.triangulate(nearCocircular);
+    expect(result).toBe(TriangulateResult.success);
+    expect(solution.length).toBe(2);
+
+    for (const tri of solution) {
+      const area = Math.abs(Clipper.area(tri));
+      expect(area).toBeGreaterThan(0);
+    }
+  });
+
+  // Large coordinates near areSafeDeltas threshold
+  it('should handle large coordinates near safe integer boundary', () => {
+    const scale = 1e12; // Large but still safe
+    const largeCoords: Paths64 = [
+      [
+        { x: Math.floor(scale), y: Math.floor(scale), z: 0 },
+        { x: Math.floor(scale + 1000), y: Math.floor(scale), z: 0 },
+        { x: Math.floor(scale + 1000), y: Math.floor(scale + 1000), z: 0 },
+        { x: Math.floor(scale), y: Math.floor(scale + 1000), z: 0 },
+      ]
+    ];
+
+    const { result, solution } = Clipper.triangulate(largeCoords);
+    expect(result).toBe(TriangulateResult.success);
+    expect(solution.length).toBe(2);
+
+    const { violations } = checkDelaunayProperty(solution, largeCoords);
+    expect(violations).toBe(0);
+  });
+
+  // Coordinates that require BigInt fallback
+  it('should handle coordinates requiring BigInt arithmetic', () => {
+    const veryLarge: Paths64 = [
+      [
+        { x: 50000000000, y: 50000000000, z: 0 },
+        { x: 50000001000, y: 50000000000, z: 0 },
+        { x: 50000001000, y: 50000001000, z: 0 },
+        { x: 50000000000, y: 50000001000, z: 0 },
+      ]
+    ];
+
+    const { result, solution } = Clipper.triangulate(veryLarge);
+    expect(result).toBe(TriangulateResult.success);
+    expect(solution.length).toBe(2);
+
+    // Area sum sanity check for precision
+    let totalArea = 0;
+    for (const tri of solution) {
+      totalArea += Math.abs(Clipper.area(tri));
+    }
+    const expectedArea = 1000 * 1000; // 1000x1000 square
+    expect(Math.abs(totalArea - expectedArea)).toBeLessThan(1);
+  });
+
+  // Nearly collinear points exercise sign stability
+  it('should handle nearly collinear points without infinite loop', () => {
+    const nearlyCollinear: Paths64 = [
+      Clipper.makePath([
+        0, 0,
+        500000, 1,     // Almost on line from origin
+        1000000, 2,    // Almost on line
+        1000000, 500000,
+        500000, 500000,
+        0, 500000
+      ])
+    ];
+
+    const { result, solution } = Clipper.triangulate(nearlyCollinear);
+    expect([TriangulateResult.success, TriangulateResult.fail]).toContain(result);
+  }, 5000);
+
+  // Non-convex quad stresses forceLegal guard
+  it('should handle non-convex quad configurations', () => {
+    const concave: Paths64 = [
+      Clipper.makePath([
+        0, 0,
+        100, 0,
+        100, 50,
+        50, 25,  // Creates concavity
+        0, 50
+      ])
+    ];
+
+    const { result, solution } = Clipper.triangulate(concave);
+    expect(result).toBe(TriangulateResult.success);
+
+    for (const tri of solution) {
+      const area = Clipper.area(tri);
+      expect(area).toBeGreaterThan(0);
+    }
+  }, 5000);
+});
+
+describe('Triangulation Degenerate Inputs', () => {
+  it('should handle duplicate vertices', () => {
+    const dupes: Paths64 = [
+      Clipper.makePath([
+        0, 0,
+        100, 0,
+        100, 0,   // duplicate
+        100, 100,
+        100, 100, // duplicate
+        0, 100,
+        0, 0,
+        0, 0      // duplicate
+      ])
+    ];
+
+    const { result, solution } = Clipper.triangulate(dupes);
+    expect([TriangulateResult.success, TriangulateResult.fail, TriangulateResult.noPolygons])
+      .toContain(result);
+
+    if (result === TriangulateResult.success) {
+      for (const tri of solution) {
+        expect(Math.abs(Clipper.area(tri))).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('should handle closed paths with repeated start/end', () => {
+    const closed: Paths64 = [
+      Clipper.makePath([0, 0, 100, 0, 100, 100, 0, 100, 0, 0])
+    ];
+
+    const { result, solution } = Clipper.triangulate(closed);
+    expect([TriangulateResult.success, TriangulateResult.fail]).toContain(result);
+    if (result === TriangulateResult.success) {
+      expect(solution).toHaveLength(2);
+    }
+  });
+
+  it('should handle sliver spikes without collapsing', () => {
+    const sliver: Paths64 = [
+      Clipper.makePath([
+        0, 0,
+        1000000, 0,
+        1000000, 1000000,
+        0, 1000000,
+        0, 999999,
+        1, 999999,
+        0, 999998
+      ])
+    ];
+
+    const { result, solution } = Clipper.triangulate(sliver);
+    expect(result).toBe(TriangulateResult.success);
+
+    for (const tri of solution) {
+      expect(Math.abs(Clipper.area(tri))).toBeGreaterThan(0);
+    }
+  });
+
+  it('should triangulate multiple disjoint polygons', () => {
+    const polys: Paths64 = [
+      Clipper.makePath([0, 0, 10, 0, 10, 10, 0, 10]),
+      Clipper.makePath([20, 0, 30, 0, 30, 10, 20, 10])
+    ];
+
+    const { result, solution } = Clipper.triangulate(polys);
+    expect(result).toBe(TriangulateResult.success);
+    expect(solution).toHaveLength(4);
+  });
+
+  it('should handle self-touching polygons after union cleanup', () => {
+    const bowtie: Paths64 = [
+      Clipper.makePath([0, 0, 10, 10, 0, 10, 10, 0])
+    ];
+
+    const cleaned = Clipper.union(bowtie, FillRule.NonZero);
+    const { result, solution } = Clipper.triangulate(cleaned);
+    expect([TriangulateResult.success, TriangulateResult.fail, TriangulateResult.noPolygons])
+      .toContain(result);
+    if (result === TriangulateResult.success) {
+      expect(solution.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('should handle polygons that touch at a single vertex', () => {
+    const touching: Paths64 = [
+      Clipper.makePath([0, 0, 10, 0, 10, 10, 0, 10]),
+      Clipper.makePath([10, 10, 20, 10, 20, 20, 10, 20])
+    ];
+
+    const { result, solution } = Clipper.triangulate(touching);
+    expect(result).toBe(TriangulateResult.success);
+    expect(solution).toHaveLength(4);
+  });
+});
+
+describe('Triangulation Robustness', () => {
+  // Small deterministic fuzz set
+  it('should handle various random polygon configurations', () => {
+    const seed = 12345;
+    let rng = seed;
+    const nextRand = () => {
+      rng = (rng * 1103515245 + 12345) & 0x7fffffff;
+      return rng;
+    };
+
+    for (let trial = 0; trial < 10; trial++) {
+      const numPoints = 10 + (nextRand() % 20);
+      const points: Point64[] = [];
+      
+      for (let i = 0; i < numPoints; i++) {
+        points.push({
+          x: nextRand() % 10000,
+          y: nextRand() % 10000,
+          z: 0
+        });
+      }
+
+      const poly: Paths64 = [points];
+      
+      // Union to resolve crossings
+      const cleaned = Clipper.union(poly, FillRule.NonZero);
+      
+      if (cleaned.length > 0) {
+        const { result } = Clipper.triangulate(cleaned);
+        // Guard against hangs and invalid status codes
+        expect([
+          TriangulateResult.success,
+          TriangulateResult.fail,
+          TriangulateResult.noPolygons,
+          TriangulateResult.pathsIntersect
+        ]).toContain(result);
+      }
+    }
+  }, 30000);
+
+  // Timeout guard
+  it('should complete triangulation within timeout for complex polygons', () => {
+    // Many vertices and alternating radius
+    const numVertices = 100;
+    const points: Point64[] = [];
+    
+    for (let i = 0; i < numVertices; i++) {
+      const angle = (2 * Math.PI * i) / numVertices;
+      const radius = 1000 + (i % 2) * 200; // Alternating radius for star-like shape
+      points.push({
+        x: Math.round(Math.cos(angle) * radius) + 1500,
+        y: Math.round(Math.sin(angle) * radius) + 1500,
+        z: 0
+      });
+    }
+
+    const poly: Paths64 = [points];
+    const startTime = Date.now();
+    const { result, solution } = Clipper.triangulate(poly);
+    const elapsed = Date.now() - startTime;
+
+    expect(result).toBe(TriangulateResult.success);
+    expect(elapsed).toBeLessThan(5000); // 5s guardrail
+    expect(solution.length).toBeGreaterThan(0);
   }, 10000);
 });
