@@ -8,8 +8,8 @@
 *******************************************************************************/
 
 import {
-  Point64, PointD, Path64, PathD, Paths64, PathsD, FillRule, ClipType, PathType,
-  Point64Utils, PointDUtils, InternalClipper
+  Path64, PathD, Paths64, PathsD, FillRule, ClipType, PathType,
+  Point64Utils, InternalClipper
 } from './Core.js';
 import { Clipper64 } from './Engine.js';
 

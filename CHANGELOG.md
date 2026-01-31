@@ -2,6 +2,17 @@
 
 All changes to this project will be documented in this file
 
+## [2.0.1-6]
+
+### Changed
+- Removed `Clipper` namespace for better tree-shaking via [#11](https://github.com/countertype/clipper2-ts/pull/11), which was based on [#4](https://github.com/countertype/clipper2-ts/pull/4) to address [#3](https://github.com/countertype/clipper2-ts/issues/3)
+  - Added `sideEffects: false` to package.json for same reason
+- Updated eslint to v9 (flat config) to resolve moderate security vulnerability
+  - Removed unused imports across source files
+
+### Deprecated
+- `Clipper` object export from `Clipper.js` - use named exports or `import * as Clipper` instead
+
 ## [2.0.1-5]
 
 ### Fixed

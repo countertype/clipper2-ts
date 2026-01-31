@@ -8,8 +8,8 @@
 *******************************************************************************/
 
 import {
-  Point64, PointD, Path64, PathD, Paths64, PathsD, Rect64, RectD,
-  PointInPolygonResult, InternalClipper, Point64Utils, Rect64Utils, RectDUtils
+  Point64, Path64, Paths64, Rect64,
+  PointInPolygonResult, InternalClipper, Point64Utils, Rect64Utils
 } from './Core.js';
 
 export class OutPt2 {
