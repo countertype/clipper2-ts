@@ -18,8 +18,7 @@ export { Minkowski } from './Minkowski.js';
 // Export triangulation functionality
 export { TriangulateResult, Delaunay } from './Triangulation.js';
 // Export main Clipper namespace with convenience functions
-export { Clipper } from './Clipper.js';
+export * as Clipper from './Clipper.js';
 // Re-export main functions for convenience
-import { Clipper } from './Clipper.js';
-export const { intersect, intersectD, union, unionD, difference, differenceD, xor, xorD, booleanOp, booleanOpWithPolyTree, booleanOpD, booleanOpDWithPolyTree, inflatePaths, inflatePathsD, rectClip, rectClipLines, minkowskiSum, minkowskiSumD, minkowskiDiff, minkowskiDiffD, area, areaPaths, areaD, areaPathsD, isPositive, isPositiveD, getBounds, getBoundsPaths, getBoundsD, getBoundsPathsD, makePath, makePathD, scalePath64, scalePaths64, scalePathD, scalePathsD, translatePath, translatePaths, translatePathD, translatePathsD, reversePath, reversePathD, reversePaths, reversePathsD, stripDuplicates, trimCollinear, trimCollinearD, pointInPolygon, pointInPolygonD, ellipse, ellipseD, simplifyPath, simplifyPaths, simplifyPathD, simplifyPathsD, ramerDouglasPeucker, ramerDouglasPeuckerPaths, ramerDouglasPeuckerD, ramerDouglasPeuckerPathsD, triangulate, triangulateD } = Clipper;
+export { intersect, intersectD, union, unionD, difference, differenceD, xor, xorD, booleanOp, booleanOpWithPolyTree, booleanOpD, booleanOpDWithPolyTree, inflatePaths, inflatePathsD, rectClip, rectClipLines, minkowskiSum, minkowskiSumD, minkowskiDiff, minkowskiDiffD, area, areaPaths, areaD, areaPathsD, isPositive, isPositiveD, getBounds, getBoundsPaths, getBoundsD, getBoundsPathsD, makePath, makePathD, scalePath64, scalePaths64, scalePathD, scalePathsD, translatePath, translatePaths, translatePathD, translatePathsD, reversePath, reversePathD, reversePaths, reversePathsD, stripDuplicates, trimCollinear, trimCollinearD, pointInPolygon, pointInPolygonD, ellipse, ellipseD, simplifyPath, simplifyPaths, simplifyPathD, simplifyPathsD, ramerDouglasPeucker, ramerDouglasPeuckerPaths, ramerDouglasPeuckerD, ramerDouglasPeuckerPathsD, triangulate, triangulateD } from './Clipper.js';
 //# sourceMappingURL=index.js.map

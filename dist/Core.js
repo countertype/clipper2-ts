@@ -46,10 +46,82 @@ export var InternalClipper;
     InternalClipper.Invalid64 = Number(InternalClipper.MaxInt64);
     InternalClipper.floatingPointTolerance = 1E-12;
     InternalClipper.defaultMinimumEdgeLength = 0.1;
+    const maxSafeInteger = Number.MAX_SAFE_INTEGER;
+    const maxDeltaForSafeProduct = Math.floor(Math.sqrt(maxSafeInteger));
+    InternalClipper.maxCoordForSafeAreaProduct = Math.floor(maxDeltaForSafeProduct / 2);
+    // Bound for |a|,|b|,|c|,|d| so cross^2 and denom stay safe
+    InternalClipper.maxCoordForSafeCrossSq = Math.floor(Math.sqrt(Math.sqrt(maxSafeInteger / 4)));
+    function maxSafeCoordinateForScale(scale) {
+        if (!Number.isFinite(scale)) {
+            throw new RangeError("Scale must be a finite number");
+        }
+        const absScale = Math.abs(scale);
+        if (absScale === 0)
+            return Number.POSITIVE_INFINITY;
+        return maxSafeInteger / absScale;
+    }
+    InternalClipper.maxSafeCoordinateForScale = maxSafeCoordinateForScale;
+    function checkSafeScaleValue(value, maxAbs, context) {
+        if (!Number.isFinite(value) || Math.abs(value) > maxAbs) {
+            throw new RangeError(`Scaled coordinate exceeds Number.MAX_SAFE_INTEGER in ${context}`);
+        }
+    }
+    InternalClipper.checkSafeScaleValue = checkSafeScaleValue;
+    function ensureSafeInteger(value, context) {
+        if (!Number.isFinite(value) || Math.abs(value) > maxSafeInteger) {
+            throw new RangeError(`Coordinate exceeds Number.MAX_SAFE_INTEGER in ${context}`);
+        }
+    }
+    InternalClipper.ensureSafeInteger = ensureSafeInteger;
+    function isSafeProduct(a, b) {
+        if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b))
+            return false;
+        if (a === 0 || b === 0)
+            return true;
+        return Math.abs(a) <= maxSafeInteger / Math.abs(b);
+    }
+    function isSafeSum(a, b) {
+        return Math.abs(a) + Math.abs(b) <= maxSafeInteger;
+    }
+    function safeMultiplyDifference(a, b, c, d) {
+        if (isSafeProduct(a, b) && isSafeProduct(c, d)) {
+            const prod1 = a * b;
+            const prod2 = c * d;
+            if (isSafeSum(prod1, prod2)) {
+                return prod1 - prod2;
+            }
+        }
+        if (Number.isSafeInteger(a) && Number.isSafeInteger(b) &&
+            Number.isSafeInteger(c) && Number.isSafeInteger(d)) {
+            return Number((BigInt(a) * BigInt(b)) - (BigInt(c) * BigInt(d)));
+        }
+        return (a * b) - (c * d);
+    }
+    function safeMultiplySum(a, b, c, d) {
+        if (isSafeProduct(a, b) && isSafeProduct(c, d)) {
+            const prod1 = a * b;
+            const prod2 = c * d;
+            if (isSafeSum(prod1, prod2)) {
+                return prod1 + prod2;
+            }
+        }
+        if (Number.isSafeInteger(a) && Number.isSafeInteger(b) &&
+            Number.isSafeInteger(c) && Number.isSafeInteger(d)) {
+            return Number((BigInt(a) * BigInt(b)) + (BigInt(c) * BigInt(d)));
+        }
+        return (a * b) + (c * d);
+    }
     function crossProduct(pt1, pt2, pt3) {
-        // typecast to avoid potential int overflow
-        return ((pt2.x - pt1.x) * (pt3.y - pt2.y) -
-            (pt2.y - pt1.y) * (pt3.x - pt2.x));
+        const a = pt2.x - pt1.x;
+        const b = pt3.y - pt2.y;
+        const c = pt2.y - pt1.y;
+        const d = pt3.x - pt2.x;
+        // Fast path for small coordinates
+        if (Math.abs(a) < maxDeltaForSafeProduct && Math.abs(b) < maxDeltaForSafeProduct &&
+            Math.abs(c) < maxDeltaForSafeProduct && Math.abs(d) < maxDeltaForSafeProduct) {
+            return (a * b) - (c * d);
+        }
+        return safeMultiplyDifference(a, b, c, d);
     }
     InternalClipper.crossProduct = crossProduct;
     function crossProductSign(pt1, pt2, pt3) {
@@ -57,35 +129,25 @@ export var InternalClipper;
         const b = pt3.y - pt2.y;
         const c = pt2.y - pt1.y;
         const d = pt3.x - pt2.x;
-        // Fast check for safe integer range (approx 9.4e7)
+        // Fast check for safe integer range
         // Using Math.abs inline allows short-circuiting
-        if (Math.abs(a) < 9e7 && Math.abs(b) < 9e7 && Math.abs(c) < 9e7 && Math.abs(d) < 9e7) {
+        if (Math.abs(a) < maxDeltaForSafeProduct && Math.abs(b) < maxDeltaForSafeProduct &&
+            Math.abs(c) < maxDeltaForSafeProduct && Math.abs(d) < maxDeltaForSafeProduct) {
             const prod1 = a * b;
             const prod2 = c * d;
             return (prod1 > prod2) ? 1 : (prod1 < prod2) ? -1 : 0;
         }
-        // Optimization: Check signs first!
-        // This often avoids large number multiplication entirely.
-        const signA = (a < 0 ? -1 : (a > 0 ? 1 : 0));
-        const signB = (b < 0 ? -1 : (b > 0 ? 1 : 0));
-        const signC = (c < 0 ? -1 : (c > 0 ? 1 : 0));
-        const signD = (d < 0 ? -1 : (d > 0 ? 1 : 0));
-        const signAB = signA * signB;
-        const signCD = signC * signD;
-        if (signAB !== signCD) {
-            return signAB > signCD ? 1 : -1;
+        if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b) ||
+            !Number.isSafeInteger(c) || !Number.isSafeInteger(d)) {
+            const prod1 = a * b;
+            const prod2 = c * d;
+            return (prod1 > prod2) ? 1 : (prod1 < prod2) ? -1 : 0;
         }
-        if (signAB === 0)
-            return 0; // both 0 because signs equal
-        const bigA = BigInt(a);
-        const bigB = BigInt(b);
-        const bigC = BigInt(c);
-        const bigD = BigInt(d);
-        const prod1 = bigA * bigB;
-        const prod2 = bigC * bigD;
-        if (prod1 === prod2)
+        const bigProd1 = BigInt(a) * BigInt(b);
+        const bigProd2 = BigInt(c) * BigInt(d);
+        if (bigProd1 === bigProd2)
             return 0;
-        return (prod1 > prod2) ? 1 : -1;
+        return (bigProd1 > bigProd2) ? 1 : -1;
     }
     InternalClipper.crossProductSign = crossProductSign;
     function checkPrecision(precision) {
@@ -108,8 +170,8 @@ export var InternalClipper;
         const bBig = BigInt(b);
         const res = aBig * bBig;
         return {
-            lo64: Number(res & 0xffffffffffffffffn),
-            hi64: Number(res >> 64n)
+            lo64: res & 0xffffffffffffffffn,
+            hi64: res >> 64n
         };
     }
     InternalClipper.multiplyUInt64 = multiplyUInt64;
@@ -123,8 +185,9 @@ export var InternalClipper;
         if (absA < 46341 && absB < 46341 && absC < 46341 && absD < 46341) {
             return a * b === c * d;
         }
-        // Extended fast path for safe integer range (approx 9.4e7)
-        if (absA < 9e7 && absB < 9e7 && absC < 9e7 && absD < 9e7) {
+        // Extended fast path for safe integer range
+        if (absA < maxDeltaForSafeProduct && absB < maxDeltaForSafeProduct &&
+            absC < maxDeltaForSafeProduct && absD < maxDeltaForSafeProduct) {
             return a * b === c * d;
         }
         const signAb = (a < 0 ? -1 : (a > 0 ? 1 : 0)) * (b < 0 ? -1 : (b > 0 ? 1 : 0));
@@ -133,6 +196,10 @@ export var InternalClipper;
             return false;
         if (signAb === 0)
             return true;
+        if (!Number.isSafeInteger(absA) || !Number.isSafeInteger(absB) ||
+            !Number.isSafeInteger(absC) || !Number.isSafeInteger(absD)) {
+            return a * b === c * d;
+        }
         const bigA = BigInt(absA);
         const bigB = BigInt(absB);
         const bigC = BigInt(absC);
@@ -151,11 +218,87 @@ export var InternalClipper;
     }
     InternalClipper.isCollinear = isCollinear;
     function dotProduct(pt1, pt2, pt3) {
-        // typecast to avoid potential int overflow
-        return ((pt2.x - pt1.x) * (pt3.x - pt2.x) +
-            (pt2.y - pt1.y) * (pt3.y - pt2.y));
+        const a = pt2.x - pt1.x;
+        const b = pt3.x - pt2.x;
+        const c = pt2.y - pt1.y;
+        const d = pt3.y - pt2.y;
+        // Fast path for small coordinates
+        if (Math.abs(a) < maxDeltaForSafeProduct && Math.abs(b) < maxDeltaForSafeProduct &&
+            Math.abs(c) < maxDeltaForSafeProduct && Math.abs(d) < maxDeltaForSafeProduct) {
+            return (a * b) + (c * d);
+        }
+        return safeMultiplySum(a, b, c, d);
     }
     InternalClipper.dotProduct = dotProduct;
+    function dotProductSign(pt1, pt2, pt3) {
+        const a = pt2.x - pt1.x;
+        const b = pt3.x - pt2.x;
+        const c = pt2.y - pt1.y;
+        const d = pt3.y - pt2.y;
+        if (Math.abs(a) < maxDeltaForSafeProduct && Math.abs(b) < maxDeltaForSafeProduct &&
+            Math.abs(c) < maxDeltaForSafeProduct && Math.abs(d) < maxDeltaForSafeProduct) {
+            const sum = (a * b) + (c * d);
+            return sum > 0 ? 1 : (sum < 0 ? -1 : 0);
+        }
+        if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b) ||
+            !Number.isSafeInteger(c) || !Number.isSafeInteger(d)) {
+            const sum = (a * b) + (c * d);
+            return sum > 0 ? 1 : (sum < 0 ? -1 : 0);
+        }
+        const bigSum = (BigInt(a) * BigInt(b)) + (BigInt(c) * BigInt(d));
+        if (bigSum === 0n)
+            return 0;
+        return bigSum > 0n ? 1 : -1;
+    }
+    InternalClipper.dotProductSign = dotProductSign;
+    function area(path) {
+        // https://en.wikipedia.org/wiki/Shoelace_formula
+        const cnt = path.length;
+        if (cnt < 3)
+            return 0.0;
+        // Fast path when coords are small enough that (y1+y2)*(x1-x2) won't overflow
+        // maxCoordForSafeAreaProduct is floor(sqrt(Number.MAX_SAFE_INTEGER) / 2)
+        let allSmall = true;
+        for (let i = 0; i < cnt && allSmall; i++) {
+            const pt = path[i];
+            if (Math.abs(pt.x) >= InternalClipper.maxCoordForSafeAreaProduct ||
+                Math.abs(pt.y) >= InternalClipper.maxCoordForSafeAreaProduct) {
+                allSmall = false;
+            }
+        }
+        let prevPt = path[cnt - 1];
+        if (allSmall) {
+            // Fast path - no overflow checks needed
+            let total = 0.0;
+            for (const pt of path) {
+                total += (prevPt.y + pt.y) * (prevPt.x - pt.x);
+                prevPt = pt;
+            }
+            return total * 0.5;
+        }
+        // Safe path - use BigInt for accumulation
+        let totalBig = 0n;
+        for (const pt of path) {
+            const sum = prevPt.y + pt.y;
+            const diff = prevPt.x - pt.x;
+            if (Number.isSafeInteger(sum) && Number.isSafeInteger(diff)) {
+                totalBig += BigInt(sum) * BigInt(diff);
+            }
+            else if (Number.isSafeInteger(prevPt.y) && Number.isSafeInteger(pt.y) &&
+                Number.isSafeInteger(prevPt.x) && Number.isSafeInteger(pt.x)) {
+                const sumBig = BigInt(prevPt.y) + BigInt(pt.y);
+                const diffBig = BigInt(prevPt.x) - BigInt(pt.x);
+                totalBig += sumBig * diffBig;
+            }
+            else {
+                // Coordinates not safe integers - fall back to float
+                totalBig += BigInt(Math.round(sum * diff));
+            }
+            prevPt = pt;
+        }
+        return Number(totalBig) * 0.5;
+    }
+    InternalClipper.area = area;
     function crossProductD(vec1, vec2) {
         return (vec1.y * vec2.x - vec2.y * vec1.x);
     }
@@ -192,11 +335,11 @@ export var InternalClipper;
         const dx1 = (ln1b.x - ln1a.x);
         const dy2 = (ln2b.y - ln2a.y);
         const dx2 = (ln2b.x - ln2a.x);
-        const det = dy1 * dx2 - dy2 * dx1;
+        const det = safeMultiplyDifference(dy1, dx2, dy2, dx1);
         if (det === 0.0) {
             return { intersects: false, point: { x: 0, y: 0 } };
         }
-        const t = ((ln1a.x - ln2a.x) * dy2 - (ln1a.y - ln2a.y) * dx2) / det;
+        const t = safeMultiplyDifference((ln1a.x - ln2a.x), dy2, (ln1a.y - ln2a.y), dx2) / det;
         let ip;
         if (t <= 0.0) {
             // Create a copy to avoid mutating original.
@@ -249,19 +392,21 @@ export var InternalClipper;
         if (!inclusive) {
             // Match C# fast path - use cross product multiplication
             // This avoids floating point equality checks (safer than === 0)
-            return (crossProduct(seg1a, seg2a, seg2b) *
-                crossProduct(seg1b, seg2a, seg2b) < 0) &&
-                (crossProduct(seg2a, seg1a, seg1b) *
-                    crossProduct(seg2b, seg1a, seg1b) < 0);
+            const s1 = crossProductSign(seg1a, seg2a, seg2b);
+            const s2 = crossProductSign(seg1b, seg2a, seg2b);
+            const s3 = crossProductSign(seg2a, seg1a, seg1b);
+            const s4 = crossProductSign(seg2b, seg1a, seg1b);
+            return (s1 !== 0 && s2 !== 0 && s1 !== s2) &&
+                (s3 !== 0 && s4 !== 0 && s3 !== s4);
         }
         // Inclusive case - match C# implementation
-        const res1 = crossProduct(seg1a, seg2a, seg2b);
-        const res2 = crossProduct(seg1b, seg2a, seg2b);
-        if (res1 * res2 > 0)
+        const res1 = crossProductSign(seg1a, seg2a, seg2b);
+        const res2 = crossProductSign(seg1b, seg2a, seg2b);
+        if (res1 !== 0 && res1 === res2)
             return false;
-        const res3 = crossProduct(seg2a, seg1a, seg1b);
-        const res4 = crossProduct(seg2b, seg1a, seg1b);
-        if (res3 * res4 > 0)
+        const res3 = crossProductSign(seg2a, seg1a, seg1b);
+        const res4 = crossProductSign(seg2b, seg1a, seg1b);
+        if (res3 !== 0 && res3 === res4)
             return false;
         // ensure NOT collinear
         return (res1 !== 0 || res2 !== 0 || res3 !== 0 || res4 !== 0);
@@ -295,7 +440,8 @@ export var InternalClipper;
             return { x: seg1.x, y: seg1.y, z: 0 }; // Return copy, not reference
         const dx = (seg2.x - seg1.x);
         const dy = (seg2.y - seg1.y);
-        const q = ((offPt.x - seg1.x) * dx + (offPt.y - seg1.y) * dy) / ((dx * dx) + (dy * dy));
+        const q = safeMultiplySum((offPt.x - seg1.x), dx, (offPt.y - seg1.y), dy) /
+            safeMultiplySum(dx, dx, dy, dy);
         const qClamped = q < 0 ? 0 : (q > 1 ? 1 : q);
         return {
             // use Math.round to match the C# MidpointRounding.ToEven behavior
@@ -401,10 +547,17 @@ export var InternalClipper;
         }
         // since path1's location is still equivocal, check its midpoint
         const mp = getBounds(path1);
-        const midPt = {
-            x: Math.round((mp.left + mp.right) / 2),
-            y: Math.round((mp.top + mp.bottom) / 2)
-        };
+        let midX, midY;
+        if (Number.isSafeInteger(mp.left) && Number.isSafeInteger(mp.right) &&
+            Math.abs(mp.left) + Math.abs(mp.right) > Number.MAX_SAFE_INTEGER) {
+            midX = Number((BigInt(mp.left) + BigInt(mp.right)) / 2n);
+            midY = Number((BigInt(mp.top) + BigInt(mp.bottom)) / 2n);
+        }
+        else {
+            midX = Math.round((mp.left + mp.right) / 2);
+            midY = Math.round((mp.top + mp.bottom) / 2);
+        }
+        const midPt = { x: midX, y: midY };
         return pointInPolygon(midPt, path2) !== PointInPolygonResult.IsOutside;
     }
     InternalClipper.path2ContainsPath1 = path2ContainsPath1;
@@ -417,6 +570,8 @@ export var Point64Utils;
     }
     Point64Utils.create = create;
     function fromPointD(pt) {
+        InternalClipper.ensureSafeInteger(pt.x, "Point64Utils.fromPointD");
+        InternalClipper.ensureSafeInteger(pt.y, "Point64Utils.fromPointD");
         return { x: Math.round(pt.x), y: Math.round(pt.y), z: pt.z || 0 };
     }
     Point64Utils.fromPointD = fromPointD;
@@ -433,6 +588,19 @@ export var Point64Utils;
     }
     Point64Utils.equals = equals;
     function add(a, b) {
+        if (Number.isSafeInteger(a.x) && Number.isSafeInteger(b.x) &&
+            Number.isSafeInteger(a.y) && Number.isSafeInteger(b.y)) {
+            const sumX = a.x + b.x;
+            const sumY = a.y + b.y;
+            if (Number.isSafeInteger(sumX) && Number.isSafeInteger(sumY)) {
+                return { x: sumX, y: sumY, z: 0 };
+            }
+            return {
+                x: Number(BigInt(a.x) + BigInt(b.x)),
+                y: Number(BigInt(a.y) + BigInt(b.y)),
+                z: 0
+            };
+        }
         return { x: a.x + b.x, y: a.y + b.y, z: 0 };
     }
     Point64Utils.add = add;
@@ -514,6 +682,12 @@ export var Rect64Utils;
     }
     Rect64Utils.isValid = isValid;
     function midPoint(rect) {
+        if (Number.isSafeInteger(rect.left) && Number.isSafeInteger(rect.right) &&
+            Math.abs(rect.left) + Math.abs(rect.right) > Number.MAX_SAFE_INTEGER) {
+            const midX = Number((BigInt(rect.left) + BigInt(rect.right)) / 2n);
+            const midY = Number((BigInt(rect.top) + BigInt(rect.bottom)) / 2n);
+            return { x: midX, y: midY };
+        }
         return {
             x: Math.round((rect.left + rect.right) / 2),
             y: Math.round((rect.top + rect.bottom) / 2)

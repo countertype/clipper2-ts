@@ -272,7 +272,7 @@ export declare class ClipperBase {
     private startOpenPath;
     private checkJoinLeft;
     private checkJoinRight;
-    private perpendicDistFromLineSqrd;
+    private perpendicDistFromLineSqrdGreaterThanQuarter;
     private intersectEdges;
     private swapPositionsInAEL;
     private isValidAelOrder;

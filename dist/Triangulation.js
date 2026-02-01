@@ -53,6 +53,7 @@ class Edge {
     triA = null;
     triB = null;
     isActive = false;
+    pendingDelaunay = false;
     nextE = null;
     prevE = null;
 }
@@ -77,8 +78,51 @@ export class Delaunay {
     useDelaunay;
     firstActive = null;
     lowermostVertex = null;
+    fastMath = false;
     constructor(delaunay = true) {
         this.useDelaunay = delaunay;
+    }
+    updateFastMath(paths) {
+        let hasPoint = false;
+        let minX = 0;
+        let maxX = 0;
+        let minY = 0;
+        let maxY = 0;
+        let safe = true;
+        for (const path of paths) {
+            for (const pt of path) {
+                if (!Number.isSafeInteger(pt.x) || !Number.isSafeInteger(pt.y)) {
+                    safe = false;
+                    break;
+                }
+                if (!hasPoint) {
+                    hasPoint = true;
+                    minX = pt.x;
+                    maxX = pt.x;
+                    minY = pt.y;
+                    maxY = pt.y;
+                }
+                else {
+                    if (pt.x < minX)
+                        minX = pt.x;
+                    if (pt.x > maxX)
+                        maxX = pt.x;
+                    if (pt.y < minY)
+                        minY = pt.y;
+                    if (pt.y > maxY)
+                        maxY = pt.y;
+                }
+            }
+            if (!safe)
+                break;
+        }
+        if (!safe || !hasPoint) {
+            this.fastMath = false;
+            return;
+        }
+        const maxDeltaX = maxX - minX;
+        const maxDeltaY = maxY - minY;
+        this.fastMath = Math.max(maxDeltaX, maxDeltaY) <= Delaunay.maxSafeDelta;
     }
     addPath(path) {
         const len = path.length;
@@ -96,7 +140,7 @@ export class Delaunay {
             iPrev = Delaunay.prev(iPrev, len);
         iNext = Delaunay.next(i0, len);
         let i = i0;
-        while (InternalClipper.crossProductSign(path[iPrev], path[i], path[iNext]) === 0) {
+        while (this.crossProductSign(path[iPrev], path[i], path[iNext]) === 0) {
             const result = Delaunay.findLocMinIdx(path, len, i);
             if (!result.found)
                 return; // entirely collinear path
@@ -109,7 +153,7 @@ export class Delaunay {
         const vert_cnt = this.allVertices.length;
         const v0 = new Vertex2(path[i]);
         this.allVertices.push(v0);
-        if (Delaunay.leftTurning(path[iPrev], path[i], path[iNext]))
+        if (this.leftTurning(path[iPrev], path[i], path[iNext]))
             v0.innerLM = true;
         let vPrev = v0;
         i = iNext;
@@ -123,7 +167,7 @@ export class Delaunay {
                     vPrev.pt.x < this.lowermostVertex.pt.x))
                 this.lowermostVertex = vPrev;
             iNext = Delaunay.next(i, len);
-            if (InternalClipper.crossProductSign(vPrev.pt, path[i], path[iNext]) === 0) {
+            if (this.crossProductSign(vPrev.pt, path[i], path[iNext]) === 0) {
                 i = iNext;
                 continue;
             }
@@ -135,7 +179,7 @@ export class Delaunay {
                 vPrev = v;
                 i = iNext;
                 iNext = Delaunay.next(i, len);
-                while (InternalClipper.crossProductSign(vPrev.pt, path[i], path[iNext]) === 0) {
+                while (this.crossProductSign(vPrev.pt, path[i], path[iNext]) === 0) {
                     i = iNext;
                     iNext = Delaunay.next(i, len);
                 }
@@ -149,7 +193,7 @@ export class Delaunay {
                 vPrev = v;
                 i = iNext;
                 iNext = Delaunay.next(i, len);
-                while (InternalClipper.crossProductSign(vPrev.pt, path[i], path[iNext]) === 0) {
+                while (this.crossProductSign(vPrev.pt, path[i], path[iNext]) === 0) {
                     i = iNext;
                     iNext = Delaunay.next(i, len);
                 }
@@ -157,7 +201,7 @@ export class Delaunay {
             // now at the next locMin
             if (i === i0)
                 break;
-            if (Delaunay.leftTurning(vPrevPrev.pt, vPrev.pt, path[i]))
+            if (this.leftTurning(vPrevPrev.pt, vPrev.pt, path[i]))
                 vPrev.innerLM = true;
         }
         this.createEdge(v0, vPrev, EdgeKind.descend);
@@ -165,9 +209,9 @@ export class Delaunay {
         const pathLen = this.allVertices.length - vert_cnt;
         const idx = vert_cnt;
         if (pathLen < 3 || (pathLen === 3 &&
-            ((Delaunay.distSqr(this.allVertices[idx].pt, this.allVertices[idx + 1].pt) <= 1) ||
-                (Delaunay.distSqr(this.allVertices[idx + 1].pt, this.allVertices[idx + 2].pt) <= 1) ||
-                (Delaunay.distSqr(this.allVertices[idx + 2].pt, this.allVertices[idx].pt) <= 1)))) {
+            ((this.distSqr(this.allVertices[idx].pt, this.allVertices[idx + 1].pt) <= 1) ||
+                (this.distSqr(this.allVertices[idx + 1].pt, this.allVertices[idx + 2].pt) <= 1) ||
+                (this.distSqr(this.allVertices[idx + 2].pt, this.allVertices[idx].pt) <= 1)))) {
             for (let j = vert_cnt; j < this.allVertices.length; ++j)
                 this.allVertices[j].edges = []; // flag to ignore
         }
@@ -196,12 +240,15 @@ export class Delaunay {
         // precondition - edgeList must be sorted - ascending on edge.vL.pt.x
         for (let i1 = 0; i1 < this.allEdges.length; ++i1) {
             const e1 = this.allEdges[i1];
+            const e1vR = e1.vR.pt.x;
+            const e1vB = e1.vB.pt.y;
+            const e1vT = e1.vT.pt.y;
             for (let i2 = i1 + 1; i2 < this.allEdges.length; ++i2) {
                 const e2 = this.allEdges[i2];
-                if (e2.vL.pt.x >= e1.vR.pt.x)
+                if (e2.vL.pt.x >= e1vR)
                     break;
-                if (e2.vT.pt.y < e1.vB.pt.y && e2.vB.pt.y > e1.vT.pt.y &&
-                    Delaunay.segsIntersect(e2.vL.pt, e2.vR.pt, e1.vL.pt, e1.vR.pt) === IntersectKind.intersect) {
+                if (e2.vT.pt.y < e1vB && e2.vB.pt.y > e1vT &&
+                    this.segsIntersect(e2.vL.pt, e2.vR.pt, e1.vL.pt, e1.vR.pt) === IntersectKind.intersect) {
                     if (!this.removeIntersection(e2, e1))
                         return false;
                 }
@@ -246,7 +293,7 @@ export class Delaunay {
                 for (let iE2 = iE + 1; iE2 < v1.edges.length; ++iE2) {
                     const e2 = v1.edges[iE2];
                     if (e2.vB !== v1 || e1.vT.pt.y === e2.vT.pt.y ||
-                        InternalClipper.crossProductSign(e1.vT.pt, v1.pt, e2.vT.pt) !== 0)
+                        this.crossProductSign(e1.vT.pt, v1.pt, e2.vT.pt) !== 0)
                         continue;
                     // parallel edges from v1 up
                     if (e1.vT.pt.y < e2.vT.pt.y)
@@ -273,19 +320,19 @@ export class Delaunay {
     removeIntersection(e1, e2) {
         let v = e1.vL;
         let tmpE = e2;
-        let d = Delaunay.shortestDistFromSegment(e1.vL.pt, e2.vL.pt, e2.vR.pt);
-        let d2 = Delaunay.shortestDistFromSegment(e1.vR.pt, e2.vL.pt, e2.vR.pt);
+        let d = this.shortestDistFromSegment(e1.vL.pt, e2.vL.pt, e2.vR.pt);
+        let d2 = this.shortestDistFromSegment(e1.vR.pt, e2.vL.pt, e2.vR.pt);
         if (d2 < d) {
             d = d2;
             v = e1.vR;
         }
-        d2 = Delaunay.shortestDistFromSegment(e2.vL.pt, e1.vL.pt, e1.vR.pt);
+        d2 = this.shortestDistFromSegment(e2.vL.pt, e1.vL.pt, e1.vR.pt);
         if (d2 < d) {
             d = d2;
             tmpE = e1;
             v = e2.vL;
         }
-        d2 = Delaunay.shortestDistFromSegment(e2.vR.pt, e1.vL.pt, e1.vR.pt);
+        d2 = this.shortestDistFromSegment(e2.vR.pt, e1.vL.pt, e1.vR.pt);
         if (d2 < d) {
             d = d2;
             tmpE = e1;
@@ -334,7 +381,7 @@ export class Delaunay {
         v1.edges.push(res);
         v2.edges.push(res);
         if (k === EdgeKind.loose) {
-            this.pendingDelaunayStack.push(res);
+            this.queuePendingDelaunay(res);
             this.addEdgeToActives(res);
         }
         return res;
@@ -399,11 +446,15 @@ export class Delaunay {
         }
         if (vertA === null || vertB === null)
             return;
-        if (InternalClipper.crossProductSign(vertA.pt, edge.vL.pt, edge.vR.pt) === 0)
+        const cpsA = this.crossProductSign(vertA.pt, edge.vL.pt, edge.vR.pt);
+        if (cpsA === 0)
             return;
-        const ictResult = Delaunay.inCircleTest(vertA.pt, edge.vL.pt, edge.vR.pt, vertB.pt);
+        const cpsB = this.crossProductSign(vertB.pt, edge.vL.pt, edge.vR.pt);
+        if (cpsB === 0 || cpsA === cpsB)
+            return;
+        const ictResult = this.inCircleTest(vertA.pt, edge.vL.pt, edge.vR.pt, vertB.pt);
         if (ictResult === 0 ||
-            (Delaunay.rightTurning(vertA.pt, edge.vL.pt, edge.vR.pt) === (ictResult < 0)))
+            (this.rightTurning(vertA.pt, edge.vL.pt, edge.vR.pt) === (ictResult < 0)))
             return;
         edge.vL = vertA;
         edge.vR = vertB;
@@ -412,7 +463,7 @@ export class Delaunay {
             const eAi = edgesA[i];
             edge.triA.edges[i] = eAi;
             if (Delaunay.isLooseEdge(eAi))
-                this.pendingDelaunayStack.push(eAi);
+                this.queuePendingDelaunay(eAi);
             if (eAi.triA === edge.triA || eAi.triB === edge.triA)
                 continue;
             if (eAi.triA === edge.triB)
@@ -427,7 +478,7 @@ export class Delaunay {
             const eBi = edgesB[i];
             edge.triB.edges[i] = eBi;
             if (Delaunay.isLooseEdge(eBi))
-                this.pendingDelaunayStack.push(eBi);
+                this.queuePendingDelaunay(eBi);
             if (eBi.triA === edge.triB || eBi.triB === edge.triB)
                 continue;
             if (eBi.triA === edge.triA)
@@ -449,8 +500,8 @@ export class Delaunay {
         while (e !== null) {
             if (e.vL.pt.x <= xAbove && e.vR.pt.x >= xAbove &&
                 e.vB.pt.y >= yAbove && e.vB !== vAbove && e.vT !== vAbove &&
-                !Delaunay.leftTurning(e.vL.pt, vAbove.pt, e.vR.pt)) {
-                const d = Delaunay.shortestDistFromSegment(vAbove.pt, e.vL.pt, e.vR.pt);
+                !this.leftTurning(e.vL.pt, vAbove.pt, e.vR.pt)) {
+                const d = this.shortestDistFromSegment(vAbove.pt, e.vL.pt, e.vR.pt);
                 if (eBelow === null || d < bestD) {
                     eBelow = e;
                     bestD = d;
@@ -468,7 +519,7 @@ export class Delaunay {
             while (e !== null) {
                 if (e.vR.pt.x > xBest && e.vL.pt.x < xAbove &&
                     e.vB.pt.y > yAbove && e.vT.pt.y < yBest &&
-                    Delaunay.segsIntersect(e.vB.pt, e.vT.pt, vBest.pt, vAbove.pt) === IntersectKind.intersect) {
+                    this.segsIntersect(e.vB.pt, e.vT.pt, vBest.pt, vAbove.pt) === IntersectKind.intersect) {
                     vBest = (e.vT.pt.y > yAbove) ? e.vT : e.vB;
                     xBest = vBest.pt.x;
                     yBest = vBest.pt.y;
@@ -480,7 +531,7 @@ export class Delaunay {
             while (e !== null) {
                 if (e.vR.pt.x < xBest && e.vL.pt.x > xAbove &&
                     e.vB.pt.y > yAbove && e.vT.pt.y < yBest &&
-                    Delaunay.segsIntersect(e.vB.pt, e.vT.pt, vBest.pt, vAbove.pt) === IntersectKind.intersect) {
+                    this.segsIntersect(e.vB.pt, e.vT.pt, vBest.pt, vAbove.pt) === IntersectKind.intersect) {
                     vBest = (e.vT.pt.y > yAbove) ? e.vT : e.vB;
                     xBest = vBest.pt.x;
                     yBest = vBest.pt.y;
@@ -522,12 +573,12 @@ export class Delaunay {
             const vX = (e.vT === pivot) ? e.vB : e.vT;
             if (vX === v)
                 continue;
-            const cps = InternalClipper.crossProductSign(v.pt, pivot.pt, vX.pt);
+            const cps = this.crossProductSign(v.pt, pivot.pt, vX.pt);
             if (cps === 0) {
                 if ((v.pt.x > pivot.pt.x) === (pivot.pt.x > vX.pt.x))
                     continue;
             }
-            else if (cps > 0 || (vAlt !== null && !Delaunay.leftTurning(vX.pt, pivot.pt, vAlt.pt)))
+            else if (cps > 0 || (vAlt !== null && !this.leftTurning(vX.pt, pivot.pt, vAlt.pt)))
                 continue;
             vAlt = vX;
             eAlt = e;
@@ -563,12 +614,12 @@ export class Delaunay {
             const vX = (e.vT === pivot) ? e.vB : e.vT;
             if (vX === v)
                 continue;
-            const cps = InternalClipper.crossProductSign(v.pt, pivot.pt, vX.pt);
+            const cps = this.crossProductSign(v.pt, pivot.pt, vX.pt);
             if (cps === 0) {
                 if ((v.pt.x > pivot.pt.x) === (pivot.pt.x > vX.pt.x))
                     continue;
             }
-            else if (cps < 0 || (vAlt !== null && !Delaunay.rightTurning(vX.pt, pivot.pt, vAlt.pt)))
+            else if (cps < 0 || (vAlt !== null && !this.rightTurning(vX.pt, pivot.pt, vAlt.pt)))
                 continue;
             vAlt = vX;
             eAlt = e;
@@ -604,6 +655,12 @@ export class Delaunay {
             this.firstActive.prevE = edge;
         this.firstActive = edge;
     }
+    queuePendingDelaunay(edge) {
+        if (edge.pendingDelaunay)
+            return;
+        edge.pendingDelaunay = true;
+        this.pendingDelaunayStack.push(edge);
+    }
     removeEdgeFromActives(edge) {
         Delaunay.removeEdgeFromVertex(edge.vB, edge);
         Delaunay.removeEdgeFromVertex(edge.vT, edge);
@@ -619,6 +676,7 @@ export class Delaunay {
     }
     execute(paths) {
         const sol = [];
+        this.updateFastMath(paths);
         if (!this.addPaths(paths)) {
             return { result: TriangulateResult.noPolygons, solution: sol };
         }
@@ -740,12 +798,13 @@ export class Delaunay {
         if (this.useDelaunay) {
             while (this.pendingDelaunayStack.length > 0) {
                 const e = this.pendingDelaunayStack.pop();
+                e.pendingDelaunay = false;
                 this.forceLegal(e);
             }
         }
         for (const tri of this.allTriangles) {
             const p = Delaunay.pathFromTriangle(tri);
-            const cps = InternalClipper.crossProductSign(p[0], p[1], p[2]);
+            const cps = this.crossProductSign(p[0], p[1], p[2]);
             if (cps === 0)
                 continue;
             if (cps < 0)
@@ -754,6 +813,125 @@ export class Delaunay {
         }
         this.cleanUp();
         return { result: TriangulateResult.success, solution: sol };
+    }
+    crossProductSign(p1, p2, p3) {
+        if (!this.fastMath)
+            return InternalClipper.crossProductSign(p1, p2, p3);
+        const a = p2.x - p1.x;
+        const b = p3.y - p2.y;
+        const c = p2.y - p1.y;
+        const d = p3.x - p2.x;
+        const prod1 = a * b;
+        const prod2 = c * d;
+        return (prod1 > prod2) ? 1 : (prod1 < prod2) ? -1 : 0;
+    }
+    distSqr(pt1, pt2) {
+        return this.distanceSqr(pt1, pt2);
+    }
+    distanceSqr(a, b) {
+        if (!this.fastMath)
+            return Delaunay.distanceSqr(a, b);
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        return dx * dx + dy * dy;
+    }
+    shortestDistFromSegment(pt, segPt1, segPt2) {
+        if (!this.fastMath)
+            return Delaunay.shortestDistFromSegment(pt, segPt1, segPt2);
+        const dx = segPt2.x - segPt1.x;
+        const dy = segPt2.y - segPt1.y;
+        const ax = pt.x - segPt1.x;
+        const ay = pt.y - segPt1.y;
+        const qNum = ax * dx + ay * dy;
+        const denom = dx * dx + dy * dy;
+        if (qNum < 0)
+            return this.distanceSqr(pt, segPt1);
+        if (qNum > denom)
+            return this.distanceSqr(pt, segPt2);
+        const cross = ax * dy - dx * ay;
+        return (cross * cross) / denom;
+    }
+    segsIntersect(s1a, s1b, s2a, s2b) {
+        if (!this.fastMath)
+            return Delaunay.segsIntersect(s1a, s1b, s2a, s2b);
+        // ignore segments sharing an end-point
+        if ((s1a.x === s2a.x && s1a.y === s2a.y) ||
+            (s1a.x === s2b.x && s1a.y === s2b.y) ||
+            (s1b.x === s2b.x && s1b.y === s2b.y))
+            return IntersectKind.none;
+        const dy1 = s1b.y - s1a.y;
+        const dx1 = s1b.x - s1a.x;
+        const dy2 = s2b.y - s2a.y;
+        const dx2 = s2b.x - s2a.x;
+        const dxs = s1a.x - s2a.x;
+        const dys = s1a.y - s2a.y;
+        const cp = dy1 * dx2 - dy2 * dx1;
+        if (cp === 0)
+            return IntersectKind.collinear;
+        let t = dxs * dy2 - dys * dx2;
+        // nb: testing for t === 0 is unreliable due to float imprecision
+        if (t >= 0) {
+            if (cp < 0 || t >= cp)
+                return IntersectKind.none;
+        }
+        else {
+            if (cp > 0 || t <= cp)
+                return IntersectKind.none;
+        }
+        t = dxs * dy1 - dys * dx1;
+        if (t >= 0) {
+            if (cp > 0 && t < cp)
+                return IntersectKind.intersect;
+        }
+        else {
+            if (cp < 0 && t > cp)
+                return IntersectKind.intersect;
+        }
+        return IntersectKind.none;
+    }
+    inCircleTest(ptA, ptB, ptC, ptD) {
+        if (!this.fastMath)
+            return Delaunay.inCircleTest(ptA, ptB, ptC, ptD);
+        const ax = ptA.x - ptD.x;
+        const ay = ptA.y - ptD.y;
+        const bx = ptB.x - ptD.x;
+        const by = ptB.y - ptD.y;
+        const cx = ptC.x - ptD.x;
+        const cy = ptC.y - ptD.y;
+        const abdet = ax * by - bx * ay;
+        const bcdet = bx * cy - cx * by;
+        const cadet = cx * ay - ax * cy;
+        const alift = ax * ax + ay * ay;
+        const blift = bx * bx + by * by;
+        const clift = cx * cx + cy * cy;
+        const det = alift * bcdet + blift * cadet + clift * abdet;
+        const permanent = Math.abs(alift * bcdet) + Math.abs(blift * cadet) + Math.abs(clift * abdet);
+        // Error bound from Shewchuk's "Adaptive Precision Floating-Point Arithmetic
+        // and Fast Robust Geometric Predicates" (iccerrboundA for 2D in-circle test).
+        const eps = Number.EPSILON;
+        const errbound = (10 + 96 * eps) * eps * permanent;
+        if (det > errbound)
+            return 1;
+        if (-det > errbound)
+            return -1;
+        const axBig = BigInt(ptA.x) - BigInt(ptD.x);
+        const ayBig = BigInt(ptA.y) - BigInt(ptD.y);
+        const bxBig = BigInt(ptB.x) - BigInt(ptD.x);
+        const byBig = BigInt(ptB.y) - BigInt(ptD.y);
+        const cxBig = BigInt(ptC.x) - BigInt(ptD.x);
+        const cyBig = BigInt(ptC.y) - BigInt(ptD.y);
+        const abdetBig = axBig * byBig - bxBig * ayBig;
+        const bcdetBig = bxBig * cyBig - cxBig * byBig;
+        const cadetBig = cxBig * ayBig - axBig * cyBig;
+        const aliftBig = axBig * axBig + ayBig * ayBig;
+        const bliftBig = bxBig * bxBig + byBig * byBig;
+        const cliftBig = cxBig * cxBig + cyBig * cyBig;
+        const result = aliftBig * bcdetBig + bliftBig * cadetBig + cliftBig * abdetBig;
+        if (result > 0n)
+            return 1;
+        if (result < 0n)
+            return -1;
+        return 0;
     }
     // ---------------------------------------------------------------------
     // Static / helper functions
@@ -770,11 +948,11 @@ export class Delaunay {
     static isHorizontal(e) {
         return e.vB.pt.y === e.vT.pt.y;
     }
-    static leftTurning(p1, p2, p3) {
-        return InternalClipper.crossProductSign(p1, p2, p3) < 0;
+    leftTurning(p1, p2, p3) {
+        return this.crossProductSign(p1, p2, p3) < 0;
     }
-    static rightTurning(p1, p2, p3) {
-        return InternalClipper.crossProductSign(p1, p2, p3) > 0;
+    rightTurning(p1, p2, p3) {
+        return this.crossProductSign(p1, p2, p3) > 0;
     }
     static edgeCompleted(edge) {
         if (edge.triA === null)
@@ -868,27 +1046,95 @@ export class Delaunay {
             res.push(e.vL.pt);
         return res;
     }
+    static areSafePoints(...pts) {
+        for (const pt of pts) {
+            if (!Number.isSafeInteger(pt.x) || !Number.isSafeInteger(pt.y))
+                return false;
+        }
+        return true;
+    }
+    static maxSafeDelta = Math.floor(Math.sqrt(Number.MAX_SAFE_INTEGER / 2));
+    static areSafeDeltas(...vals) {
+        for (const v of vals) {
+            if (Math.abs(v) > Delaunay.maxSafeDelta)
+                return false;
+        }
+        return true;
+    }
     static inCircleTest(ptA, ptB, ptC, ptD) {
-        const m00 = Number(ptA.x - ptD.x);
-        const m01 = Number(ptA.y - ptD.y);
-        const m02 = m00 * m00 + m01 * m01;
-        const m10 = Number(ptB.x - ptD.x);
-        const m11 = Number(ptB.y - ptD.y);
-        const m12 = m10 * m10 + m11 * m11;
-        const m20 = Number(ptC.x - ptD.x);
-        const m21 = Number(ptC.y - ptD.y);
-        const m22 = m20 * m20 + m21 * m21;
-        return m00 * (m11 * m22 - m21 * m12) -
-            m10 * (m01 * m22 - m21 * m02) +
-            m20 * (m01 * m12 - m11 * m02);
+        const ax = ptA.x - ptD.x;
+        const ay = ptA.y - ptD.y;
+        const bx = ptB.x - ptD.x;
+        const by = ptB.y - ptD.y;
+        const cx = ptC.x - ptD.x;
+        const cy = ptC.y - ptD.y;
+        const abdet = ax * by - bx * ay;
+        const bcdet = bx * cy - cx * by;
+        const cadet = cx * ay - ax * cy;
+        const alift = ax * ax + ay * ay;
+        const blift = bx * bx + by * by;
+        const clift = cx * cx + cy * cy;
+        const det = alift * bcdet + blift * cadet + clift * abdet;
+        const permanent = Math.abs(alift * bcdet) + Math.abs(blift * cadet) + Math.abs(clift * abdet);
+        // Error bound from Shewchuk's "Adaptive Precision Floating-Point Arithmetic
+        // and Fast Robust Geometric Predicates" (iccerrboundA for 2D in-circle test).
+        // See: https://www.cs.cmu.edu/~quake/robust.html
+        const eps = Number.EPSILON;
+        const errbound = (10 + 96 * eps) * eps * permanent;
+        if (det > errbound)
+            return 1;
+        if (-det > errbound)
+            return -1;
+        if (Delaunay.areSafePoints(ptA, ptB, ptC, ptD)) {
+            const ax = BigInt(ptA.x) - BigInt(ptD.x);
+            const ay = BigInt(ptA.y) - BigInt(ptD.y);
+            const bx = BigInt(ptB.x) - BigInt(ptD.x);
+            const by = BigInt(ptB.y) - BigInt(ptD.y);
+            const cx = BigInt(ptC.x) - BigInt(ptD.x);
+            const cy = BigInt(ptC.y) - BigInt(ptD.y);
+            const abdet = ax * by - bx * ay;
+            const bcdet = bx * cy - cx * by;
+            const cadet = cx * ay - ax * cy;
+            const alift = ax * ax + ay * ay;
+            const blift = bx * bx + by * by;
+            const clift = cx * cx + cy * cy;
+            const result = alift * bcdet + blift * cadet + clift * abdet;
+            if (result > 0n)
+                return 1;
+            if (result < 0n)
+                return -1;
+            return 0;
+        }
+        return det > 0 ? 1 : det < 0 ? -1 : 0;
     }
     static shortestDistFromSegment(pt, segPt1, segPt2) {
-        const dx = Number(segPt2.x - segPt1.x);
-        const dy = Number(segPt2.y - segPt1.y);
-        const ax = Number(pt.x - segPt1.x);
-        const ay = Number(pt.y - segPt1.y);
+        const dx = segPt2.x - segPt1.x;
+        const dy = segPt2.y - segPt1.y;
+        const ax = pt.x - segPt1.x;
+        const ay = pt.y - segPt1.y;
         const qNum = ax * dx + ay * dy;
         const denom = dx * dx + dy * dy;
+        if (Delaunay.areSafeDeltas(dx, dy, ax, ay)) {
+            if (qNum < 0)
+                return Delaunay.distanceSqr(pt, segPt1);
+            if (qNum > denom)
+                return Delaunay.distanceSqr(pt, segPt2);
+            return (ax * dy - dx * ay) * (ax * dy - dx * ay) / denom;
+        }
+        if (Delaunay.areSafePoints(pt, segPt1, segPt2)) {
+            const dx = BigInt(segPt2.x) - BigInt(segPt1.x);
+            const dy = BigInt(segPt2.y) - BigInt(segPt1.y);
+            const ax = BigInt(pt.x) - BigInt(segPt1.x);
+            const ay = BigInt(pt.y) - BigInt(segPt1.y);
+            const qNum = ax * dx + ay * dy;
+            const denom = dx * dx + dy * dy;
+            if (qNum < 0n)
+                return Delaunay.distanceSqr(pt, segPt1);
+            if (qNum > denom)
+                return Delaunay.distanceSqr(pt, segPt2);
+            const cross = ax * dy - dx * ay;
+            return Number(cross * cross) / Number(denom);
+        }
         if (qNum < 0)
             return Delaunay.distanceSqr(pt, segPt1);
         if (qNum > denom)
@@ -896,18 +1142,82 @@ export class Delaunay {
         return (ax * dy - dx * ay) * (ax * dy - dx * ay) / denom;
     }
     static segsIntersect(s1a, s1b, s2a, s2b) {
-        const dy1 = Number(s1b.y - s1a.y);
-        const dx1 = Number(s1b.x - s1a.x);
-        const dy2 = Number(s2b.y - s2a.y);
-        const dx2 = Number(s2b.x - s2a.x);
+        // ignore segments sharing an end-point
+        if ((s1a.x === s2a.x && s1a.y === s2a.y) ||
+            (s1a.x === s2b.x && s1a.y === s2b.y) ||
+            (s1b.x === s2b.x && s1b.y === s2b.y))
+            return IntersectKind.none;
+        const dy1 = s1b.y - s1a.y;
+        const dx1 = s1b.x - s1a.x;
+        const dy2 = s2b.y - s2a.y;
+        const dx2 = s2b.x - s2a.x;
+        const dxs = s1a.x - s2a.x;
+        const dys = s1a.y - s2a.y;
+        if (Delaunay.areSafeDeltas(dy1, dx1, dy2, dx2, dxs, dys)) {
+            const cp = dy1 * dx2 - dy2 * dx1;
+            if (cp === 0)
+                return IntersectKind.collinear;
+            let t = dxs * dy2 - dys * dx2;
+            // nb: testing for t === 0 is unreliable due to float imprecision
+            if (t >= 0) {
+                if (cp < 0 || t >= cp)
+                    return IntersectKind.none;
+            }
+            else {
+                if (cp > 0 || t <= cp)
+                    return IntersectKind.none;
+            }
+            t = dxs * dy1 - dys * dx1;
+            if (t >= 0) {
+                if (cp > 0 && t < cp)
+                    return IntersectKind.intersect;
+            }
+            else {
+                if (cp < 0 && t > cp)
+                    return IntersectKind.intersect;
+            }
+            return IntersectKind.none;
+        }
+        if (Delaunay.areSafePoints(s1a, s1b, s2a, s2b)) {
+            const dy1 = BigInt(s1b.y) - BigInt(s1a.y);
+            const dx1 = BigInt(s1b.x) - BigInt(s1a.x);
+            const dy2 = BigInt(s2b.y) - BigInt(s2a.y);
+            const dx2 = BigInt(s2b.x) - BigInt(s2a.x);
+            const cp = dy1 * dx2 - dy2 * dx1;
+            if (cp === 0n)
+                return IntersectKind.collinear;
+            let t = (BigInt(s1a.x) - BigInt(s2a.x)) * dy2 -
+                (BigInt(s1a.y) - BigInt(s2a.y)) * dx2;
+            if (t === 0n)
+                return IntersectKind.none;
+            if (t > 0n) {
+                if (cp < 0n || t >= cp)
+                    return IntersectKind.none;
+            }
+            else {
+                if (cp > 0n || t <= cp)
+                    return IntersectKind.none;
+            }
+            t = (BigInt(s1a.x) - BigInt(s2a.x)) * dy1 -
+                (BigInt(s1a.y) - BigInt(s2a.y)) * dx1;
+            if (t === 0n)
+                return IntersectKind.none;
+            if (t > 0n) {
+                if (cp > 0n && t < cp)
+                    return IntersectKind.intersect;
+            }
+            else {
+                if (cp < 0n && t > cp)
+                    return IntersectKind.intersect;
+            }
+            return IntersectKind.none;
+        }
         const cp = dy1 * dx2 - dy2 * dx1;
         if (cp === 0)
             return IntersectKind.collinear;
-        let t = (Number(s1a.x - s2a.x) * dy2 -
-            Number(s1a.y - s2a.y) * dx2);
-        if (t === 0)
-            return IntersectKind.none;
-        if (t > 0) {
+        let t = dxs * dy2 - dys * dx2;
+        // nb: testing for t === 0 is unreliable due to float imprecision
+        if (t >= 0) {
             if (cp < 0 || t >= cp)
                 return IntersectKind.none;
         }
@@ -915,11 +1225,8 @@ export class Delaunay {
             if (cp > 0 || t <= cp)
                 return IntersectKind.none;
         }
-        t = (Number(s1a.x - s2a.x) * dy1 -
-            Number(s1a.y - s2a.y) * dx1);
-        if (t === 0)
-            return IntersectKind.none;
-        if (t > 0) {
+        t = dxs * dy1 - dys * dx1;
+        if (t >= 0) {
             if (cp > 0 && t < cp)
                 return IntersectKind.intersect;
         }
@@ -930,13 +1237,21 @@ export class Delaunay {
         return IntersectKind.none;
     }
     static distSqr(pt1, pt2) {
-        const dx = Number(pt1.x - pt2.x);
-        const dy = Number(pt1.y - pt2.y);
-        return dx * dx + dy * dy;
+        return Delaunay.distanceSqr(pt1, pt2);
     }
     static distanceSqr(a, b) {
-        const dx = Number(a.x - b.x);
-        const dy = Number(a.y - b.y);
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        if (Delaunay.areSafeDeltas(dx, dy)) {
+            const dist = dx * dx + dy * dy;
+            if (dist <= Number.MAX_SAFE_INTEGER)
+                return dist;
+        }
+        if (Delaunay.areSafePoints(a, b)) {
+            const dxBig = BigInt(a.x) - BigInt(b.x);
+            const dyBig = BigInt(a.y) - BigInt(b.y);
+            return Number(dxBig * dxBig + dyBig * dyBig);
+        }
         return dx * dx + dy * dy;
     }
 }

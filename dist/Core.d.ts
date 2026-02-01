@@ -64,19 +64,26 @@ export declare namespace InternalClipper {
     const Invalid64: number;
     const floatingPointTolerance = 1e-12;
     const defaultMinimumEdgeLength = 0.1;
+    const maxCoordForSafeAreaProduct: number;
+    const maxCoordForSafeCrossSq: number;
+    function maxSafeCoordinateForScale(scale: number): number;
+    function checkSafeScaleValue(value: number, maxAbs: number, context: string): void;
+    function ensureSafeInteger(value: number, context: string): void;
     function crossProduct(pt1: Point64, pt2: Point64, pt3: Point64): number;
     function crossProductSign(pt1: Point64, pt2: Point64, pt3: Point64): number;
     function checkPrecision(precision: number): void;
     function isAlmostZero(value: number): boolean;
     function triSign(x: number): number;
     interface UInt128Struct {
-        lo64: number;
-        hi64: number;
+        lo64: bigint;
+        hi64: bigint;
     }
     function multiplyUInt64(a: number, b: number): UInt128Struct;
     function productsAreEqual(a: number, b: number, c: number, d: number): boolean;
     function isCollinear(pt1: Point64, sharedPt: Point64, pt2: Point64): boolean;
     function dotProduct(pt1: Point64, pt2: Point64, pt3: Point64): number;
+    function dotProductSign(pt1: Point64, pt2: Point64, pt3: Point64): number;
+    function area(path: Path64): number;
     function crossProductD(vec1: PointD, vec2: PointD): number;
     function dotProductD(vec1: PointD, vec2: PointD): number;
     function roundToEven(value: number): number;

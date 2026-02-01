@@ -77,24 +77,17 @@ export var Minkowski;
         return area(path) >= 0;
     }
     function area(path) {
-        // https://en.wikipedia.org/wiki/Shoelace_formula
-        let a = 0.0;
-        const cnt = path.length;
-        if (cnt < 3)
-            return 0.0;
-        let prevPt = path[cnt - 1];
-        for (const pt of path) {
-            a += (prevPt.y + pt.y) * (prevPt.x - pt.x);
-            prevPt = pt;
-        }
-        return a * 0.5;
+        return InternalClipper.area(path);
     }
     function reversePath(path) {
         return [...path].reverse();
     }
     function scalePath64(path, scale) {
+        const maxAbs = InternalClipper.maxSafeCoordinateForScale(scale);
         const result = [];
         for (const pt of path) {
+            InternalClipper.checkSafeScaleValue(pt.x, maxAbs, "Minkowski.scalePath64");
+            InternalClipper.checkSafeScaleValue(pt.y, maxAbs, "Minkowski.scalePath64");
             result.push({
                 x: InternalClipper.roundToEven(pt.x * scale),
                 y: InternalClipper.roundToEven(pt.y * scale)

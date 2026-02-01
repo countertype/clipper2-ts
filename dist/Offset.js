@@ -211,7 +211,7 @@ export class ClipperOffset {
     static getLowestPathInfo(paths) {
         let idx = -1;
         let isNegArea = false;
-        let botPt = { x: Number.MAX_SAFE_INTEGER, y: Number.MIN_SAFE_INTEGER };
+        const botPt = { x: Number.MAX_SAFE_INTEGER, y: Number.MIN_SAFE_INTEGER };
         for (let i = 0; i < paths.length; ++i) {
             let a = Number.MAX_VALUE;
             for (const pt of paths[i]) {
@@ -626,17 +626,7 @@ export class ClipperOffset {
         return result;
     }
     static area(path) {
-        // https://en.wikipedia.org/wiki/Shoelace_formula
-        let a = 0.0;
-        const cnt = path.length;
-        if (cnt < 3)
-            return 0.0;
-        let prevPt = path[cnt - 1];
-        for (const pt of path) {
-            a += (prevPt.y + pt.y) * (prevPt.x - pt.x);
-            prevPt = pt;
-        }
-        return a * 0.5;
+        return InternalClipper.area(path);
     }
     static sqr(val) {
         return val * val;

@@ -24,7 +24,9 @@ export declare class Delaunay {
     private readonly useDelaunay;
     private firstActive;
     private lowermostVertex;
+    private fastMath;
     constructor(delaunay?: boolean);
+    private updateFastMath;
     private addPath;
     private addPaths;
     private cleanUp;
@@ -40,17 +42,24 @@ export declare class Delaunay {
     private doTriangulateLeft;
     private doTriangulateRight;
     private addEdgeToActives;
+    private queuePendingDelaunay;
     private removeEdgeFromActives;
     execute(paths: Paths64): {
         result: TriangulateResult;
         solution: Paths64;
     };
+    private crossProductSign;
+    private distSqr;
+    private distanceSqr;
+    private shortestDistFromSegment;
+    private segsIntersect;
+    private inCircleTest;
     private static isLooseEdge;
     private static isLeftEdge;
     private static isRightEdge;
     private static isHorizontal;
-    private static leftTurning;
-    private static rightTurning;
+    private leftTurning;
+    private rightTurning;
     private static edgeCompleted;
     private static edgeContains;
     private static getAngle;
@@ -61,6 +70,9 @@ export declare class Delaunay {
     private static next;
     private static findLinkingEdge;
     private static pathFromTriangle;
+    private static areSafePoints;
+    private static readonly maxSafeDelta;
+    private static areSafeDeltas;
     private static inCircleTest;
     private static shortestDistFromSegment;
     private static segsIntersect;

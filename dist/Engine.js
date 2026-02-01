@@ -229,7 +229,7 @@ export var ClipperEngine;
                     prevV = currV;
                 }
             }
-            if (prevV?.prev === null)
+            if (prevV?.prev == null)
                 continue;
             if (!isOpen && prevV.pt.x === v0.pt.x && prevV.pt.y === v0.pt.y)
                 prevV = prevV.prev;
@@ -1432,7 +1432,7 @@ export class ClipperBase {
                     val = 1 - val; // toggle val
                 }
                 else {
-                    const d = InternalClipper.crossProduct(op2.prev.pt, op2.pt, pt);
+                    const d = InternalClipper.crossProductSign(op2.prev.pt, op2.pt, pt);
                     if (d === 0)
                         return PointInPolygonResult.IsOn;
                     if ((d < 0) === isAbove)
@@ -1445,7 +1445,7 @@ export class ClipperBase {
         if (isAbove === startingAbove)
             return val === 0 ? PointInPolygonResult.IsOutside : PointInPolygonResult.IsInside;
         {
-            const d = InternalClipper.crossProduct(op2.prev.pt, op2.pt, pt);
+            const d = InternalClipper.crossProductSign(op2.prev.pt, op2.pt, pt);
             if (d === 0)
                 return PointInPolygonResult.IsOn;
             if ((d < 0) === isAbove)
@@ -2040,11 +2040,12 @@ export class ClipperBase {
                 return this.fillrule === FillRule.Positive ? ae.windCount2 <= 0 :
                     this.fillrule === FillRule.Negative ? ae.windCount2 >= 0 :
                         ae.windCount2 === 0;
-            case ClipType.Difference:
+            case ClipType.Difference: {
                 const result = this.fillrule === FillRule.Positive ? (ae.windCount2 <= 0) :
                     this.fillrule === FillRule.Negative ? (ae.windCount2 >= 0) :
                         (ae.windCount2 === 0);
                 return (ClipperBase.getPolyType(ae) === PathType.Subject) ? result : !result;
+            }
             case ClipType.Xor:
                 return true; // XOr is always contributing unless open
             default:
@@ -2134,7 +2135,7 @@ export class ClipperBase {
             ((ae.bot.y > pt.y) || (prev.bot.y > pt.y)))
             return; // (#490)
         if (checkCurrX) {
-            if (this.perpendicDistFromLineSqrd(pt, prev.bot, prev.top) > 0.25)
+            if (this.perpendicDistFromLineSqrdGreaterThanQuarter(pt, prev.bot, prev.top))
                 return;
         }
         else if (ae.curX !== prev.curX)
@@ -2164,7 +2165,7 @@ export class ClipperBase {
             ((ae.bot.y > pt.y) || (next.bot.y > pt.y)))
             return; // (#490)
         if (checkCurrX) {
-            if (this.perpendicDistFromLineSqrd(pt, next.bot, next.top) > 0.25)
+            if (this.perpendicDistFromLineSqrdGreaterThanQuarter(pt, next.bot, next.top))
                 return;
         }
         else if (ae.curX !== next.curX)
@@ -2183,14 +2184,31 @@ export class ClipperBase {
         ae.joinWith = JoinWith.Right;
         next.joinWith = JoinWith.Left;
     }
-    perpendicDistFromLineSqrd(pt, line1, line2) {
+    perpendicDistFromLineSqrdGreaterThanQuarter(pt, line1, line2) {
         const a = pt.x - line1.x;
         const b = pt.y - line1.y;
         const c = line2.x - line1.x;
         const d = line2.y - line1.y;
         if (c === 0 && d === 0)
-            return 0;
-        return ((a * d - c * b) * (a * d - c * b)) / (c * c + d * d);
+            return false;
+        // Fast path: keep within safe integer range
+        const maxCoord = InternalClipper.maxCoordForSafeCrossSq;
+        if (Math.abs(a) < maxCoord && Math.abs(b) < maxCoord &&
+            Math.abs(c) < maxCoord && Math.abs(d) < maxCoord) {
+            const cross = (a * d) - (c * b);
+            return (cross * cross) / ((c * c) + (d * d)) > 0.25;
+        }
+        // Large coordinates: use BigInt for precision
+        if (Number.isSafeInteger(a) && Number.isSafeInteger(b) &&
+            Number.isSafeInteger(c) && Number.isSafeInteger(d)) {
+            const cross = (BigInt(a) * BigInt(d)) - (BigInt(c) * BigInt(b));
+            const crossSq = cross * cross;
+            const denom = (BigInt(c) * BigInt(c)) + (BigInt(d) * BigInt(d));
+            return 4n * crossSq > denom;
+        }
+        // Fallback for non-integer coords
+        const cross = (a * d) - (c * b);
+        return (cross * cross) / ((c * c) + (d * d)) > 0.25;
     }
     intersectEdges(ae1, ae2, pt) {
         let resultOp = null;
@@ -2428,17 +2446,17 @@ export class ClipperBase {
             return newcomer.curX > resident.curX;
         }
         // get the turning direction  a1.top, a2.bot, a2.top
-        const d = InternalClipper.crossProduct(resident.top, newcomer.bot, newcomer.top);
+        const d = InternalClipper.crossProductSign(resident.top, newcomer.bot, newcomer.top);
         if (d !== 0)
             return d < 0;
         // edges must be collinear to get here
         // for starting open paths, place them according to
         // the direction they're about to turn
         if (!ClipperBase.isMaxima(resident) && (resident.top.y > newcomer.top.y)) {
-            return InternalClipper.crossProduct(newcomer.bot, resident.top, ClipperBase.nextVertex(resident).pt) <= 0;
+            return InternalClipper.crossProductSign(newcomer.bot, resident.top, ClipperBase.nextVertex(resident).pt) <= 0;
         }
         if (!ClipperBase.isMaxima(newcomer) && (newcomer.top.y > resident.top.y)) {
-            return InternalClipper.crossProduct(newcomer.bot, newcomer.top, ClipperBase.nextVertex(newcomer).pt) >= 0;
+            return InternalClipper.crossProductSign(newcomer.bot, newcomer.top, ClipperBase.nextVertex(newcomer).pt) >= 0;
         }
         const y = newcomer.bot.y;
         const newcomerIsLeft = newcomer.isLeftBound;
@@ -2452,7 +2470,7 @@ export class ClipperBase {
         if (InternalClipper.isCollinear(ClipperBase.prevPrevVertex(resident).pt, resident.bot, resident.top))
             return true;
         // compare turning direction of the alternate bound
-        return (InternalClipper.crossProduct(ClipperBase.prevPrevVertex(resident).pt, newcomer.bot, ClipperBase.prevPrevVertex(newcomer).pt) > 0) === newcomerIsLeft;
+        return (InternalClipper.crossProductSign(ClipperBase.prevPrevVertex(resident).pt, newcomer.bot, ClipperBase.prevPrevVertex(newcomer).pt) > 0) === newcomerIsLeft;
     }
     isJoined(e) {
         return e.joinWith !== JoinWith.None;
@@ -2815,7 +2833,7 @@ export class ClipperBase {
                 ((op2.pt.x === op2.prev.pt.x && op2.pt.y === op2.prev.pt.y) ||
                     (op2.pt.x === op2.next.pt.x && op2.pt.y === op2.next.pt.y) ||
                     !this.preserveCollinear ||
-                    InternalClipper.dotProduct(op2.prev.pt, op2.pt, op2.next.pt) < 0)) {
+                    InternalClipper.dotProductSign(op2.prev.pt, op2.pt, op2.next.pt) < 0)) {
                 if (op2 === outrec.pts) {
                     outrec.pts = op2.prev;
                 }
@@ -2891,14 +2909,14 @@ export class ClipperBase {
         outrec.pts = prevOp;
         const intersectResult = InternalClipper.getLineIntersectPt(prevOp.pt, splitOp.pt, splitOp.next.pt, nextNextOp.pt);
         const ip = intersectResult.point;
-        const area1 = ClipperBase.areaOutPt(prevOp);
-        const absArea1 = Math.abs(area1);
-        if (absArea1 < 2) {
+        const doubleArea1 = ClipperBase.areaOutPt(prevOp);
+        const absDoubleArea1 = doubleArea1 < 0n ? -doubleArea1 : doubleArea1;
+        if (absDoubleArea1 < 4n) { // area < 2
             outrec.pts = null;
             return;
         }
-        const area2 = this.areaTriangle(ip, splitOp.pt, splitOp.next.pt);
-        const absArea2 = Math.abs(area2);
+        const doubleArea2 = this.areaTriangle(ip, splitOp.pt, splitOp.next.pt);
+        const absDoubleArea2 = doubleArea2 < 0n ? -doubleArea2 : doubleArea2;
         // de-link splitOp and splitOp.next from the path
         // while inserting the intersection point
         if ((ip.x === prevOp.pt.x && ip.y === prevOp.pt.y) || (ip.x === nextNextOp.pt.x && ip.y === nextNextOp.pt.y)) {
@@ -2912,9 +2930,9 @@ export class ClipperBase {
             nextNextOp.prev = newOp2;
             prevOp.next = newOp2;
         }
-        if (!(absArea2 > 1) ||
-            (!(absArea2 > absArea1) &&
-                ((area2 > 0) !== (area1 > 0))))
+        if (!(absDoubleArea2 > 2n) || // area > 1
+            (!(absDoubleArea2 > absDoubleArea1) &&
+                ((doubleArea2 > 0n) !== (doubleArea1 > 0n))))
             return;
         const newOutRec = this.newOutRec();
         newOutRec.owner = outrec.owner;
@@ -2940,19 +2958,65 @@ export class ClipperBase {
         }
     }
     static areaOutPt(op) {
-        // https://en.wikipedia.org/wiki/Shoelace_formula
+        const maxCoord = InternalClipper.maxCoordForSafeAreaProduct;
         let area = 0.0;
+        let allSmall = true;
         let op2 = op;
         do {
-            area += (op2.prev.pt.y + op2.pt.y) * (op2.prev.pt.x - op2.pt.x);
+            const prev = op2.prev;
+            const pt = op2.pt;
+            if (Math.abs(prev.pt.x) >= maxCoord || Math.abs(prev.pt.y) >= maxCoord ||
+                Math.abs(pt.x) >= maxCoord || Math.abs(pt.y) >= maxCoord) {
+                allSmall = false;
+                break;
+            }
+            area += (prev.pt.y + pt.y) * (prev.pt.x - pt.x);
             op2 = op2.next;
         } while (op2 !== op);
-        return area * 0.5;
+        if (allSmall) {
+            return BigInt(Math.round(area));
+        }
+        let areaBig = 0n;
+        op2 = op;
+        do {
+            const prev = op2.prev;
+            if (Number.isSafeInteger(prev.pt.y) && Number.isSafeInteger(op2.pt.y) &&
+                Number.isSafeInteger(prev.pt.x) && Number.isSafeInteger(op2.pt.x)) {
+                const sumBig = BigInt(prev.pt.y) + BigInt(op2.pt.y);
+                const diffBig = BigInt(prev.pt.x) - BigInt(op2.pt.x);
+                areaBig += sumBig * diffBig;
+            }
+            else {
+                const sum = prev.pt.y + op2.pt.y;
+                const diff = prev.pt.x - op2.pt.x;
+                areaBig += BigInt(Math.round(sum * diff));
+            }
+            op2 = op2.next;
+        } while (op2 !== op);
+        return areaBig;
     }
     areaTriangle(pt1, pt2, pt3) {
-        return ((pt3.y + pt1.y) * (pt3.x - pt1.x) +
+        const maxCoord = InternalClipper.maxCoordForSafeAreaProduct;
+        if (Math.abs(pt1.x) < maxCoord && Math.abs(pt1.y) < maxCoord &&
+            Math.abs(pt2.x) < maxCoord && Math.abs(pt2.y) < maxCoord &&
+            Math.abs(pt3.x) < maxCoord && Math.abs(pt3.y) < maxCoord) {
+            const area = ((pt3.y + pt1.y) * (pt3.x - pt1.x) +
+                (pt1.y + pt2.y) * (pt1.x - pt2.x) +
+                (pt2.y + pt3.y) * (pt2.x - pt3.x));
+            return BigInt(Math.round(area));
+        }
+        if (Number.isSafeInteger(pt1.x) && Number.isSafeInteger(pt1.y) &&
+            Number.isSafeInteger(pt2.x) && Number.isSafeInteger(pt2.y) &&
+            Number.isSafeInteger(pt3.x) && Number.isSafeInteger(pt3.y)) {
+            const term1 = (BigInt(pt3.y) + BigInt(pt1.y)) * (BigInt(pt3.x) - BigInt(pt1.x));
+            const term2 = (BigInt(pt1.y) + BigInt(pt2.y)) * (BigInt(pt1.x) - BigInt(pt2.x));
+            const term3 = (BigInt(pt2.y) + BigInt(pt3.y)) * (BigInt(pt2.x) - BigInt(pt3.x));
+            return term1 + term2 + term3;
+        }
+        const area = ((pt3.y + pt1.y) * (pt3.x - pt1.x) +
             (pt1.y + pt2.y) * (pt1.x - pt2.x) +
             (pt2.y + pt3.y) * (pt2.x - pt3.x));
+        return BigInt(Math.round(area));
     }
     isValidOwner(outRec, testOwner) {
         while (testOwner !== null && testOwner !== outRec) {
@@ -3208,17 +3272,7 @@ export class ClipperD extends ClipperBase {
 export var Clipper;
 (function (Clipper) {
     function area(path) {
-        // https://en.wikipedia.org/wiki/Shoelace_formula
-        let a = 0.0;
-        const cnt = path.length;
-        if (cnt < 3)
-            return 0.0;
-        let prevPt = path[cnt - 1];
-        for (const pt of path) {
-            a += (prevPt.y + pt.y) * (prevPt.x - pt.x);
-            prevPt = pt;
-        }
-        return a * 0.5;
+        return InternalClipper.area(path);
     }
     Clipper.area = area;
     function areaD(path) {
@@ -3235,8 +3289,11 @@ export var Clipper;
     }
     Clipper.areaD = areaD;
     function scalePath64(path, scale) {
+        const maxAbs = InternalClipper.maxSafeCoordinateForScale(scale);
         const result = [];
         for (const pt of path) {
+            InternalClipper.checkSafeScaleValue(pt.x, maxAbs, "scalePath64");
+            InternalClipper.checkSafeScaleValue(pt.y, maxAbs, "scalePath64");
             result.push({
                 x: Math.round(pt.x * scale),
                 y: Math.round(pt.y * scale)
