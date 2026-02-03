@@ -536,29 +536,23 @@ export class Delaunay {
     if (eBelow === null) return null;
 
     let vBest = (eBelow.vT.pt.y <= yAbove) ? eBelow.vB : eBelow.vT;
-    let xBest = vBest.pt.x;
-    let yBest = vBest.pt.y;
 
-    e = this.firstActive;
-    if (xBest < xAbove) {
+    // Iterate until no blocking edge is found for the current bridge vBest->vAbove.
+    // We must restart the search whenever vBest changes because edges checked earlier
+    // might now intersect the new bridge.
+    let changed = true;
+    while (changed) {
+      changed = false;
+      e = this.firstActive;
       while (e !== null) {
-        if (e.vR.pt.x > xBest && e.vL.pt.x < xAbove &&
-          e.vB.pt.y > yAbove && e.vT.pt.y < yBest &&
-          this.segsIntersect(e.vB.pt, e.vT.pt, vBest.pt, vAbove.pt) === IntersectKind.intersect) {
-          vBest = (e.vT.pt.y > yAbove) ? e.vT : e.vB;
-          xBest = vBest.pt.x;
-          yBest = vBest.pt.y;
-        }
-        e = e.nextE;
-      }
-    } else {
-      while (e !== null) {
-        if (e.vR.pt.x < xBest && e.vL.pt.x > xAbove &&
-          e.vB.pt.y > yAbove && e.vT.pt.y < yBest &&
-          this.segsIntersect(e.vB.pt, e.vT.pt, vBest.pt, vAbove.pt) === IntersectKind.intersect) {
-          vBest = (e.vT.pt.y > yAbove) ? e.vT : e.vB;
-          xBest = vBest.pt.x;
-          yBest = vBest.pt.y;
+        // Skip edges that share a vertex with the bridge (not a true intersection)
+        if (e.vB !== vBest && e.vT !== vBest && e.vB !== vAbove && e.vT !== vAbove) {
+          if (this.segsIntersect(e.vB.pt, e.vT.pt, vBest.pt, vAbove.pt) === IntersectKind.intersect) {
+            // Found a blocking edge - use the vertex closer to yAbove as new vBest
+            vBest = (e.vT.pt.y > yAbove) ? e.vT : e.vB;
+            changed = true;
+            break; // restart search with new vBest
+          }
         }
         e = e.nextE;
       }
