@@ -150,5 +150,7 @@ export {
   ramerDouglasPeuckerD,
   ramerDouglasPeuckerPathsD,
   triangulate,
-  triangulateD
+  triangulateD,
+  polyTreeToPaths64,
+  polyTreeToPathsD
 } from './Clipper.js';

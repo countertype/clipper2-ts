@@ -2,10 +2,11 @@
 
 All changes to this project will be documented in this file
 
-## [2.0.1-8] - Unreleased
+## [2.0.1-8]
 
 ### Fixed
 - Triangulation: fixed overlapping triangles in polygons with holes ([#1062](https://github.com/AngusJohnson/Clipper2/issues/1062)) by correcting bridge-edge visibility check in `createInnerLocMinLooseEdge`
+- Export `polyTreeToPaths64` and `polyTreeToPathsD` directly from index (previously only available via `Clipper` namespace)
 
 ## [2.0.1-7]
 
