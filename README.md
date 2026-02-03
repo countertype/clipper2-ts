@@ -14,7 +14,7 @@ npm install clipper2-ts
 ## Usage
 
 ```typescript
-import { Clipper, FillRule, JoinType, EndType } from 'clipper2-ts';
+import { intersect, union, difference, xor, inflatePaths, FillRule, JoinType, EndType } from 'clipper2-ts';
 
 // Define polygons as arrays of points
 const subject = [[
@@ -32,13 +32,13 @@ const clip = [[
 ]];
 
 // Boolean operations
-const intersection = Clipper.intersect(subject, clip, FillRule.NonZero);
-const union = Clipper.union(subject, clip, FillRule.NonZero);
-const difference = Clipper.difference(subject, clip, FillRule.NonZero);
-const xor = Clipper.xor(subject, clip, FillRule.NonZero);
+const intersection = intersect(subject, clip, FillRule.NonZero);
+const unionResult = union(subject, clip, FillRule.NonZero);
+const diff = difference(subject, clip, FillRule.NonZero);
+const xorResult = xor(subject, clip, FillRule.NonZero);
 
 // Polygon offsetting (inflate/deflate)
-const offset = Clipper.inflatePaths(subject, 10, JoinType.Round, EndType.Polygon);
+const offset = inflatePaths(subject, 10, JoinType.Round, EndType.Polygon);
 ```
 
 ### Triangulation
@@ -46,7 +46,7 @@ const offset = Clipper.inflatePaths(subject, 10, JoinType.Round, EndType.Polygon
 Convert polygons into triangles using constrained Delaunay triangulation:
 
 ```typescript
-import { Clipper, TriangulateResult } from 'clipper2-ts';
+import { triangulate, triangulateD, TriangulateResult } from 'clipper2-ts';
 
 const polygon = [[
   { x: 0, y: 0 },
@@ -55,14 +55,14 @@ const polygon = [[
   { x: 0, y: 100 }
 ]];
 
-const { result, solution } = Clipper.triangulate(polygon);
+const { result, solution } = triangulate(polygon);
 if (result === TriangulateResult.success) {
   // solution contains triangles (each with 3 vertices)
   console.log(`Created ${solution.length} triangles`);
 }
 
 // For floating-point coordinates:
-const { result: resultD, solution: solutionD } = Clipper.triangulateD(polygon, 2);
+const { result: resultD, solution: solutionD } = triangulateD(polygon, 2);
 ```
 
 ### Z-coordinate support
