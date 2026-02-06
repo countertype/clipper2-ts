@@ -223,17 +223,18 @@ export class Active {
   public joinWith: JoinWith = JoinWith.None;
 }
 
-export namespace ClipperEngine {
-  export function addLocMin(vert: Vertex, polytype: PathType, isOpen: boolean, minimaList: LocalMinima[]): void {
+// Plain object replaces namespace to avoid IIFE wrapper in tsc output.
+export const ClipperEngine = {
+  addLocMin(vert: Vertex, polytype: PathType, isOpen: boolean, minimaList: LocalMinima[]): void {
     // make sure the vertex is added only once ...
     if ((vert.flags & VertexFlags.LocalMin) !== VertexFlags.None) return;
     vert.flags |= VertexFlags.LocalMin;
 
     const lm = new LocalMinima(vert, polytype, isOpen);
     minimaList.push(lm);
-  }
+  },
 
-  export function addPathsToVertexList(
+  addPathsToVertexList(
     paths: Paths64, 
     polytype: PathType, 
     isOpen: boolean,
@@ -274,7 +275,7 @@ export namespace ClipperEngine {
         goingUp = currV!.pt.y <= v0!.pt.y;
         if (goingUp) {
           v0!.flags = VertexFlags.OpenStart;
-          addLocMin(v0!, polytype, true, minimaList);
+          ClipperEngine.addLocMin(v0!, polytype, true, minimaList);
         } else {
           v0!.flags = VertexFlags.OpenStart | VertexFlags.LocalMax;
         }
@@ -296,7 +297,7 @@ export namespace ClipperEngine {
           goingUp = false;
         } else if (currV!.pt.y < prevV!.pt.y && !goingUp) {
           goingUp = true;
-          addLocMin(prevV!, polytype, isOpen, minimaList);
+          ClipperEngine.addLocMin(prevV!, polytype, isOpen, minimaList);
         }
         prevV = currV;
         currV = currV!.next;
@@ -307,14 +308,14 @@ export namespace ClipperEngine {
         if (goingUp)
           prevV!.flags |= VertexFlags.LocalMax;
         else
-          addLocMin(prevV!, polytype, isOpen, minimaList);
+          ClipperEngine.addLocMin(prevV!, polytype, isOpen, minimaList);
       } else if (goingUp !== goingUp0) {
-        if (goingUp0) addLocMin(prevV!, polytype, false, minimaList);
+        if (goingUp0) ClipperEngine.addLocMin(prevV!, polytype, false, minimaList);
         else prevV!.flags |= VertexFlags.LocalMax;
       }
     }
-  }
-}
+  },
+};
 
 export class ReuseableDataContainer64 {
   private readonly minimaList: LocalMinima[];
@@ -3424,13 +3425,13 @@ export class ClipperD extends ClipperBase {
   }
 }
 
-// Forward declaration for Clipper class
-export namespace Clipper {
-  export function area(path: Path64): number {
+// Forward declaration for Clipper class (plain object, avoids namespace IIFE)
+export const Clipper = {
+  area(path: Path64): number {
     return InternalClipper.area(path);
-  }
+  },
 
-  export function areaD(path: PathD): number {
+  areaD(path: PathD): number {
     let a = 0.0;
     const cnt = path.length;
     if (cnt < 3) return 0.0;
@@ -3440,9 +3441,9 @@ export namespace Clipper {
       prevPt = pt;
     }
     return a * 0.5;
-  }
+  },
 
-  export function scalePath64(path: PathD, scale: number): Path64 {
+  scalePath64(path: PathD, scale: number): Path64 {
     const maxAbs = InternalClipper.maxSafeCoordinateForScale(scale);
     const result: Path64 = [];
     for (const pt of path) {
@@ -3454,17 +3455,17 @@ export namespace Clipper {
       });
     }
     return result;
-  }
+  },
 
-  export function scalePaths64(paths: PathsD, scale: number): Paths64 {
+  scalePaths64(paths: PathsD, scale: number): Paths64 {
     const result: Paths64 = [];
     for (const path of paths) {
-      result.push(scalePath64(path, scale));
+      result.push(Clipper.scalePath64(path, scale));
     }
     return result;
-  }
+  },
 
-  export function scalePathD(path: Path64, scale: number): PathD {
+  scalePathD(path: Path64, scale: number): PathD {
     const result: PathD = [];
     for (const pt of path) {
       result.push({
@@ -3473,13 +3474,13 @@ export namespace Clipper {
       });
     }
     return result;
-  }
+  },
 
-  export function scalePathsD(paths: Paths64, scale: number): PathsD {
+  scalePathsD(paths: Paths64, scale: number): PathsD {
     const result: PathsD = [];
     for (const path of paths) {
-      result.push(scalePathD(path, scale));
+      result.push(Clipper.scalePathD(path, scale));
     }
     return result;
-  }
-}
+  },
+};

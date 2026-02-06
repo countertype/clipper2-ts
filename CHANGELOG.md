@@ -8,6 +8,12 @@ All changes to this project will be documented in this file
 
 - `Engine`: ScanlineHeap siftUp/siftDown now use hole-sift pattern instead of destructuring swap (avoids temporary array allocation per swap step)
 - `Core`: removed redundant `< 46341` fast path in `productsAreEqual` (`maxDeltaForSafeProduct` replaced it)
+- Converted remaining TypeScript `namespace` declarations to plain `const` objects across Core.ts, Engine.ts, and Minkowski.ts`InternalClipper.UInt128Struct` preserved as a deprecated type alias for backward compatibility though it's unlikely anyone was using it
+- Removed stale `OutPtPool` and `VertexPool` files from dist (no corresponding source)
+- Added `exports` field to package.json for modern bundler resolution
+- Froze `InvalidRect64` and `InvalidRectD` singletons with `Object.freeze`
+- Added rolldown bundled/minified single-file dist (`dist/clipper2.min.mjs`)
+- Added `type` modifiers to type-only re-exports in index.ts
 
 ### Performance
 
