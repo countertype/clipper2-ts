@@ -1,13 +1,20 @@
 {
   "name": "clipper2-ts",
-  "version": "2.0.1-8",
+  "version": "2.0.1-9",
   "description": "TypeScript port of Clipper2 polygon clipping, boolean operations, offsetting, and triangulation library",
   "type": "module",
   "main": "dist/index.js",
+  "module": "dist/clipper2.min.mjs",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "sideEffects": false,
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && rolldown -c rolldown.config.ts",
     "dev": "tsc --watch",
     "test": "vitest --run",
     "test:watch": "vitest --watch",
@@ -59,6 +66,7 @@
     "@vitest/ui": "^4.0.10",
     "eslint": "^9.39.2",
     "gh-pages": "^6.3.0",
+    "rolldown": "^1.0.0-rc.3",
     "typescript": "^5.0.0",
     "typescript-eslint": "^8.54.0",
     "vitest": "^4.0.10"

@@ -114,4 +114,6 @@ Boost Software License 1.0 (same as Clipper2)
 
 ## Credits
 
-Original library by Angus Johnson. TypeScript port maintained by Jeremy Tribby
+Original Clipper2 library by Angus Johnson. TypeScript port maintained by Jeremy Tribby
+
+Benchmark polygon data from [Poly2Tri](https://github.com/jhasse/poly2tri) (BSD 3-clause). See `LICENSE_THIRD_PARTY` for details

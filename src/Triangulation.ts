@@ -1059,7 +1059,11 @@ export class Delaunay {
   private static removeEdgeFromVertex(vert: Vertex2, edge: Edge): void {
     const idx = vert.edges.indexOf(edge);
     if (idx < 0) throw new Error('Edge not found in vertex');
-    vert.edges.splice(idx, 1);
+    // Swap-with-last-and-pop: O(1) instead of O(n) splice.
+    // Edge order in the array doesn't matter.
+    const last = vert.edges.length - 1;
+    if (idx !== last) vert.edges[idx] = vert.edges[last];
+    vert.edges.pop();
   }
 
   private static findLocMinIdx(path: Path64, len: number, idx: number): { found: boolean, idx: number } {

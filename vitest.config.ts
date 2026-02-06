@@ -12,7 +12,7 @@ export default defineConfig({
       exclude: ['src/**/*.d.ts', 'src/**/*.test.ts']
     },
     benchmark: {
-      include: ['benchmarks/**/*.{bench,benchmark}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}']
+      include: ['bench/**/*.{bench,benchmark}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}']
     }
   }
 });

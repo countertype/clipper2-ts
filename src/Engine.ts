@@ -49,28 +49,35 @@ clear(): void {
   this.data.length = 0;
 }
 
+// Hole-sift: lift the value once, shift parents/children, then place.
+// Avoids temporary array allocation from destructuring swap on every step.
 private siftUp(index: number): void {
+  const val = this.data[index];
   while (index > 0) {
     const parent = (index - 1) >> 1;
-    if (this.data[parent] >= this.data[index]) break;
-    [this.data[parent], this.data[index]] = [this.data[index], this.data[parent]];
+    if (this.data[parent] >= val) break;
+    this.data[index] = this.data[parent];
     index = parent;
   }
+  this.data[index] = val;
 }
 
 private siftDown(index: number): void {
   const length = this.data.length;
+  const val = this.data[index];
   while (true) {
-    let largest = index;
     const left = (index << 1) + 1;
+    if (left >= length) break;
     const right = left + 1;
-
-    if (left < length && this.data[left] > this.data[largest]) largest = left;
-    if (right < length && this.data[right] > this.data[largest]) largest = right;
-    if (largest === index) break;
-    [this.data[index], this.data[largest]] = [this.data[largest], this.data[index]];
-    index = largest;
+    // Pick the larger child
+    let child = left;
+    if (right < length && this.data[right] > this.data[left]) child = right;
+    // If the larger child isn't greater than val, done
+    if (this.data[child] <= val) break;
+    this.data[index] = this.data[child];
+    index = child;
   }
+  this.data[index] = val;
 }
 }
 
@@ -119,18 +126,14 @@ export interface IntersectNode {
 }
 
 export function createIntersectNode(pt: Point64, edge1: Active, edge2: Active): IntersectNode {
-  // Create a copy of pt to avoid reference sharing (C# uses struct which copies by value).
-  // Avoid eagerly adding a `z` property when it's not present.
-  const z = pt.z;
-  return z !== undefined && z !== 0
-    ? { pt: { x: pt.x, y: pt.y, z }, edge1, edge2 }
-    : { pt: { x: pt.x, y: pt.y }, edge1, edge2 };
+  // In C# this copies pt (struct semantics), but our sole caller (addNewIntersectNode)
+  // always passes a freshly-allocated point that goes out of scope immediately,
+  // so we can take ownership directly and skip the copy.
+  return { pt, edge1, edge2 };
 }
 
 // OutPt: vertex data structure for clipping solutions
 export class OutPt {
-  private static _nextId = 1;
-  public readonly _debugId: number;
   public pt: Point64;
   public next: OutPt | null;
   public prev: OutPt;
@@ -138,7 +141,6 @@ export class OutPt {
   public horz: HorzSegment | null;
 
   constructor(pt: Point64, outrec: OutRec) {
-    this._debugId = OutPt._nextId++;
     this.pt = pt;
     this.outrec = outrec;
     this.next = this;
@@ -152,8 +154,6 @@ export enum HorzPosition { Bottom, Middle, Top }
 
 // OutRec: path data structure for clipping solutions
 export class OutRec {
-  private static _nextId = 1;
-  public readonly _debugId: number;
   public idx: number = 0;
   public owner: OutRec | null = null;
   public frontEdge: Active | null = null;
@@ -165,10 +165,6 @@ export class OutRec {
   public isOpen: boolean = false;
   public splits: number[] | null = null;
   public recursiveSplit: OutRec | null = null;
-
-  constructor() {
-    this._debugId = OutRec._nextId++;
-  }
 }
 
 export class HorzSegment {
@@ -227,17 +223,18 @@ export class Active {
   public joinWith: JoinWith = JoinWith.None;
 }
 
-export namespace ClipperEngine {
-  export function addLocMin(vert: Vertex, polytype: PathType, isOpen: boolean, minimaList: LocalMinima[]): void {
+// Plain object replaces namespace to avoid IIFE wrapper in tsc output.
+export const ClipperEngine = {
+  addLocMin(vert: Vertex, polytype: PathType, isOpen: boolean, minimaList: LocalMinima[]): void {
     // make sure the vertex is added only once ...
     if ((vert.flags & VertexFlags.LocalMin) !== VertexFlags.None) return;
     vert.flags |= VertexFlags.LocalMin;
 
     const lm = new LocalMinima(vert, polytype, isOpen);
     minimaList.push(lm);
-  }
+  },
 
-  export function addPathsToVertexList(
+  addPathsToVertexList(
     paths: Paths64, 
     polytype: PathType, 
     isOpen: boolean,
@@ -278,7 +275,7 @@ export namespace ClipperEngine {
         goingUp = currV!.pt.y <= v0!.pt.y;
         if (goingUp) {
           v0!.flags = VertexFlags.OpenStart;
-          addLocMin(v0!, polytype, true, minimaList);
+          ClipperEngine.addLocMin(v0!, polytype, true, minimaList);
         } else {
           v0!.flags = VertexFlags.OpenStart | VertexFlags.LocalMax;
         }
@@ -300,7 +297,7 @@ export namespace ClipperEngine {
           goingUp = false;
         } else if (currV!.pt.y < prevV!.pt.y && !goingUp) {
           goingUp = true;
-          addLocMin(prevV!, polytype, isOpen, minimaList);
+          ClipperEngine.addLocMin(prevV!, polytype, isOpen, minimaList);
         }
         prevV = currV;
         currV = currV!.next;
@@ -311,14 +308,14 @@ export namespace ClipperEngine {
         if (goingUp)
           prevV!.flags |= VertexFlags.LocalMax;
         else
-          addLocMin(prevV!, polytype, isOpen, minimaList);
+          ClipperEngine.addLocMin(prevV!, polytype, isOpen, minimaList);
       } else if (goingUp !== goingUp0) {
-        if (goingUp0) addLocMin(prevV!, polytype, false, minimaList);
+        if (goingUp0) ClipperEngine.addLocMin(prevV!, polytype, false, minimaList);
         else prevV!.flags |= VertexFlags.LocalMax;
       }
     }
-  }
-}
+  },
+};
 
 export class ReuseableDataContainer64 {
   private readonly minimaList: LocalMinima[];
@@ -791,11 +788,13 @@ private static topX(ae: Active, currentY: number): number {
     this.scanlineHeap.push(y);
   }
 
-  private popScanline(): { success: boolean; y: number } {
+  // Returns the next scanline Y value, or null if empty.
+  // Avoids allocating a wrapper object on every call in the main sweep loop.
+  private popScanline(): number | null {
     if (this.useScanlineArray) {
       const arr = this.scanlineArr;
       const len = arr.length;
-      if (len === 0) return { success: false, y: 0 };
+      if (len === 0) return null;
       let bestIdx = 0;
       let bestY = arr[0];
       for (let i = 1; i < len; i++) {
@@ -807,12 +806,12 @@ private static topX(ae: Active, currentY: number): number {
       }
       arr[bestIdx] = arr[len - 1];
       arr.pop();
-      return { success: true, y: bestY };
+      return bestY;
     }
     const y = this.scanlineHeap.pop();
-    if (y === null) return { success: false, y: 0 };
+    if (y === null) return null;
     this.scanlineSet.delete(y);
-    return { success: true, y };
+    return y;
   }
 
   private hasLocMinAtY(y: number): boolean {
@@ -890,9 +889,8 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
   this.cliptype = ct;
   this.reset();
   
-  const scanResult = this.popScanline();
-  if (!scanResult.success) return;
-  let y = scanResult.y;
+  let y = this.popScanline();
+  if (y === null) return;
   
   while (this.succeeded) {
     this.insertLocalMinimaIntoAEL(y);
@@ -903,9 +901,9 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       this.horzSegList.length = 0;
     }
     this.currentBotY = y; // bottom of scanbeam
-    const nextScanResult = this.popScanline();
-    if (!nextScanResult.success) break; // y new top of scanbeam
-    y = nextScanResult.y;
+    const nextY = this.popScanline();
+    if (nextY === null) break; // y new top of scanbeam
+    y = nextY;
     this.doIntersections(y);
     this.doTopOfScanbeam(y);
     while ((ae = this.popHorz()) !== null) this.doHorizontal(ae);
@@ -1808,13 +1806,10 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
   }
 
   private addNewIntersectNode(ae1: Active, ae2: Active, topY: number): void {
-    const intersectResult = InternalClipper.getLineIntersectPt(ae1.bot, ae1.top, ae2.bot, ae2.top);
-    let ip: Point64;
+    let ip = InternalClipper.getLineIntersectPt(ae1.bot, ae1.top, ae2.bot, ae2.top);
     
-    if (!intersectResult.intersects) {
+    if (ip === null) {
       ip = { x: ae1.curX, y: topY }; // parallel edges
-    } else {
-      ip = intersectResult.point;
     }
 
     if (ip.y > this.currentBotY || ip.y < topY) {
@@ -2937,6 +2932,7 @@ protected buildTree(polytree: PolyPathBase, solutionOpen: Paths64): void {
 
     let startOp = outrec.pts!;
     let op2: OutPt | null = startOp;
+    let removedAny = false;
     
     while (true) {
       // NB if preserveCollinear == true, then only remove 180 deg. spikes
@@ -2950,6 +2946,7 @@ protected buildTree(polytree: PolyPathBase, solutionOpen: Paths64): void {
           outrec.pts = op2.prev;
         }
         op2 = this.disposeOutPt(op2!);
+        removedAny = true;
         if (!this.isValidClosedPath(op2)) {
           outrec.pts = null;
           return;
@@ -2962,7 +2959,7 @@ protected buildTree(polytree: PolyPathBase, solutionOpen: Paths64): void {
       if (op2 === startOp) break;
     }
     
-    this.fixSelfIntersects(outrec);
+    if (removedAny) this.fixSelfIntersects(outrec);
   }
 
   private isValidClosedPath(op: OutPt | null): boolean {
@@ -3021,10 +3018,10 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
   const nextNextOp = splitOp.next!.next!;
   outrec.pts = prevOp;
 
-  const intersectResult = InternalClipper.getLineIntersectPt(
-    prevOp.pt, splitOp.pt, splitOp.next!.pt, nextNextOp.pt);
-  
-  const ip = intersectResult.point;
+  // doSplitOp is only reached when segments are known to intersect,
+  // so the result is never null here.
+  const ip = InternalClipper.getLineIntersectPt(
+    prevOp.pt, splitOp.pt, splitOp.next!.pt, nextNextOp.pt)!;
 
   const doubleArea1 = ClipperBase.areaOutPt(prevOp);
   const absDoubleArea1 = doubleArea1 < 0n ? -doubleArea1 : doubleArea1;
@@ -3429,13 +3426,13 @@ export class ClipperD extends ClipperBase {
   }
 }
 
-// Forward declaration for Clipper class
-export namespace Clipper {
-  export function area(path: Path64): number {
+// Forward declaration for Clipper class (plain object, avoids namespace IIFE)
+export const Clipper = {
+  area(path: Path64): number {
     return InternalClipper.area(path);
-  }
+  },
 
-  export function areaD(path: PathD): number {
+  areaD(path: PathD): number {
     let a = 0.0;
     const cnt = path.length;
     if (cnt < 3) return 0.0;
@@ -3445,9 +3442,9 @@ export namespace Clipper {
       prevPt = pt;
     }
     return a * 0.5;
-  }
+  },
 
-  export function scalePath64(path: PathD, scale: number): Path64 {
+  scalePath64(path: PathD, scale: number): Path64 {
     const maxAbs = InternalClipper.maxSafeCoordinateForScale(scale);
     const result: Path64 = [];
     for (const pt of path) {
@@ -3459,17 +3456,17 @@ export namespace Clipper {
       });
     }
     return result;
-  }
+  },
 
-  export function scalePaths64(paths: PathsD, scale: number): Paths64 {
+  scalePaths64(paths: PathsD, scale: number): Paths64 {
     const result: Paths64 = [];
     for (const path of paths) {
-      result.push(scalePath64(path, scale));
+      result.push(Clipper.scalePath64(path, scale));
     }
     return result;
-  }
+  },
 
-  export function scalePathD(path: Path64, scale: number): PathD {
+  scalePathD(path: Path64, scale: number): PathD {
     const result: PathD = [];
     for (const pt of path) {
       result.push({
@@ -3478,13 +3475,13 @@ export namespace Clipper {
       });
     }
     return result;
-  }
+  },
 
-  export function scalePathsD(paths: Paths64, scale: number): PathsD {
+  scalePathsD(paths: Paths64, scale: number): PathsD {
     const result: PathsD = [];
     for (const path of paths) {
-      result.push(scalePathD(path, scale));
+      result.push(Clipper.scalePathD(path, scale));
     }
     return result;
-  }
-}
+  },
+};
