@@ -22,7 +22,9 @@ All changes to this project will be documented in this file
 - `Offset`: push `pathOut` directly into `solution` instead of spread-cloning it; the array is freshly allocated per output path so the copy was unnecessary
 - `Core`/`Engine`: `getLineIntersectPt` returns `Point64 | null` instead of a `{ intersects, point }` wrapper object, eliminating an allocation on every intersection test
 - `Engine`: `createIntersectNode` takes ownership of the point directly instead of copying it (the caller always passes a fresh allocation)
+- `Engine`: `popScanline` returns `number | null` instead of a `{ success, y }` wrapper object, eliminating an allocation on every scanline transition in the main sweep loop
 - `RectClip`: `getSegmentIntersection` returns `Point64 | null` instead of a wrapper object; `getIntersection` reuses a single result object instead of allocating per call
+- `Core`: `roundToEven` rewritten to do `Math.round` first and only correct the rare exact-half case, removing unnecessary `Math.floor`/`Math.abs` from the hot `topX` path
 - `Triangulation`: `removeEdgeFromVertex` uses swap-with-last-and-pop instead of `splice`
 
 

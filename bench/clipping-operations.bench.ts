@@ -273,3 +273,30 @@ describe('Instance Reuse', () => {
     reusedClipperPT.execute(ClipType.Difference, FillRule.NonZero, reusedPolytree);
   });
 });
+
+describe('Geo-scale Coordinates', () => {
+  const scale = 360_000;
+  const geoComplex: Path64 = testData.mediumComplex.map(p => ({
+    x: Math.round(p.x * scale),
+    y: Math.round(p.y * scale)
+  }));
+  const geoComplexShifted: Path64 = geoComplex.map(p => ({
+    x: p.x + Math.round(200 * scale),
+    y: p.y + Math.round(200 * scale)
+  }));
+
+  bench('union - geo-scale complex polygon', () => {
+    const c = new Clipper64();
+    c.addSubject([geoComplex]);
+    const solution: Paths64 = [];
+    c.execute(ClipType.Union, FillRule.NonZero, solution);
+  });
+
+  bench('intersection - geo-scale overlapping', () => {
+    const c = new Clipper64();
+    c.addSubject([geoComplex]);
+    c.addClip([geoComplexShifted]);
+    const solution: Paths64 = [];
+    c.execute(ClipType.Intersection, FillRule.NonZero, solution);
+  });
+});
