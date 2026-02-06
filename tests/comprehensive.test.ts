@@ -109,6 +109,123 @@ describe('Comprehensive Integration Tests', () => {
     expect(result[0].length).toBeGreaterThanOrEqual(3);
   });
 
+  // RectClip: polygon passes right through the rect (enters one side, exits the opposite)
+  test('rectClip handles pass-through polygon', () => {
+    const rect = Rect64Utils.create(100, 100, 200, 200);
+    // Tall thin polygon that enters from top, exits from bottom
+    const passThrough: Paths64 = [
+      Clipper.makePath([140, 0, 160, 0, 160, 300, 140, 300])
+    ];
+    const result = Clipper.rectClip(rect, passThrough);
+    expect(result).toHaveLength(1);
+    // Clipped result should be bounded by the rect vertically
+    for (const pt of result[0]) {
+      expect(pt.y).toBeGreaterThanOrEqual(100);
+      expect(pt.y).toBeLessThanOrEqual(200);
+    }
+  });
+
+  // RectClip: polygon crosses two adjacent edges (enters left, exits top)
+  test('rectClip handles corner-crossing polygon', () => {
+    const rect = Rect64Utils.create(100, 100, 200, 200);
+    // Triangle that enters from the left side, exits from the top
+    const cornerCross: Paths64 = [
+      Clipper.makePath([50, 150, 150, 50, 150, 150])
+    ];
+    const result = Clipper.rectClip(rect, cornerCross);
+    expect(result).toHaveLength(1);
+    expect(result[0].length).toBeGreaterThanOrEqual(3);
+    for (const pt of result[0]) {
+      expect(pt.x).toBeGreaterThanOrEqual(100);
+      expect(pt.x).toBeLessThanOrEqual(200);
+      expect(pt.y).toBeGreaterThanOrEqual(100);
+      expect(pt.y).toBeLessThanOrEqual(200);
+    }
+  });
+
+  // RectClip: polygon completely contains the rect
+  test('rectClip handles polygon enclosing rect', () => {
+    const rect = Rect64Utils.create(100, 100, 200, 200);
+    const enclosing: Paths64 = [
+      Clipper.makePath([0, 0, 300, 0, 300, 300, 0, 300])
+    ];
+    const result = Clipper.rectClip(rect, enclosing);
+    expect(result).toHaveLength(1);
+    // Result should be the rect itself
+    const bounds = Clipper.getBounds(result[0]);
+    expect(bounds.left).toBe(100);
+    expect(bounds.top).toBe(100);
+    expect(bounds.right).toBe(200);
+    expect(bounds.bottom).toBe(200);
+  });
+
+  // RectClip: concave polygon with multiple crossings on the same edge
+  test('rectClip handles concave polygon with multiple edge crossings', () => {
+    const rect = Rect64Utils.create(100, 100, 300, 300);
+    // W-shaped polygon that crosses the top edge multiple times
+    const concave: Paths64 = [
+      Clipper.makePath([
+        50, 50,   // above-left
+        150, 200, // dips into rect
+        200, 50,  // back above
+        250, 200, // dips into rect again
+        350, 50,  // above-right
+        350, 350, // below-right
+        50, 350   // below-left
+      ])
+    ];
+    const result = Clipper.rectClip(rect, concave);
+    expect(result.length).toBeGreaterThanOrEqual(1);
+    // All result points should be within the rect
+    for (const path of result) {
+      for (const pt of path) {
+        expect(pt.x).toBeGreaterThanOrEqual(100);
+        expect(pt.x).toBeLessThanOrEqual(300);
+        expect(pt.y).toBeGreaterThanOrEqual(100);
+        expect(pt.y).toBeLessThanOrEqual(300);
+      }
+    }
+  });
+
+  // RectClip: polygon with edge exactly on rect boundary
+  test('rectClip handles polygon with edge on rect boundary', () => {
+    const rect = Rect64Utils.create(100, 100, 200, 200);
+    // Polygon shares its left edge with the rect's right edge
+    const onEdge: Paths64 = [
+      Clipper.makePath([200, 100, 300, 100, 300, 200, 200, 200])
+    ];
+    const result = Clipper.rectClip(rect, onEdge);
+    // Touching at a line (zero area overlap) - could be 0 or 1 depending on implementation
+    // but should not crash
+    expect(result.length).toBeLessThanOrEqual(1);
+  });
+
+  // RectClip: multiple polygons, mix of inside/outside/crossing
+  test('rectClip handles multiple polygons', () => {
+    const rect = Rect64Utils.create(100, 100, 300, 300);
+    const paths: Paths64 = [
+      Clipper.makePath([120, 120, 280, 120, 280, 280, 120, 280]), // fully inside
+      Clipper.makePath([400, 400, 500, 400, 500, 500, 400, 500]), // fully outside
+      Clipper.makePath([50, 150, 350, 150, 350, 250, 50, 250]),   // crosses left and right
+    ];
+    const result = Clipper.rectClip(rect, paths);
+    expect(result).toHaveLength(2); // inside + crossing, not the outside one
+  });
+
+  // RectClipLines: line passes through rect
+  test('rectClipLines handles line through rect', () => {
+    const rect = Rect64Utils.create(100, 100, 200, 200);
+    const lines: Paths64 = [
+      Clipper.makePath([50, 150, 250, 150]) // horizontal line through middle
+    ];
+    const result = Clipper.rectClipLines(rect, lines);
+    expect(result).toHaveLength(1);
+    // Clipped segment should span the rect width
+    expect(result[0]).toHaveLength(2);
+    expect(result[0][0].x).toBe(100);
+    expect(result[0][1].x).toBe(200);
+  });
+
   // Point utility functions test
   test('should handle point utility functions correctly', () => {
     const pt1 = Point64Utils.create(10, 20);
