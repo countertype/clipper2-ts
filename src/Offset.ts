@@ -512,7 +512,8 @@ export class ClipperOffset {
       this.offsetPoint(group, path, i, prev);
       prev = i;
     }
-    this.solution.push([...this.pathOut]);
+    // pathOut is freshly allocated per call, so push directly (no spread clone needed)
+    this.solution.push(this.pathOut);
   }
 
   private offsetOpenJoined(group: Group, path: Path64): void {
@@ -586,7 +587,8 @@ export class ClipperOffset {
       k = i;
     }
 
-    this.solution.push([...this.pathOut]);
+    // pathOut is freshly allocated per call, so push directly (no spread clone needed)
+    this.solution.push(this.pathOut);
   }
 
   private doGroupOffset(group: Group): void {
@@ -640,7 +642,8 @@ export class ClipperOffset {
             { x: r.left, y: r.bottom }
           ];
         }
-        this.solution.push([...this.pathOut]);
+        // pathOut is freshly allocated per call, so push directly (no spread clone needed)
+        this.solution.push(this.pathOut);
         continue; // end of offsetting a single point
       }
 

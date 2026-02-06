@@ -249,12 +249,7 @@ export namespace InternalClipper {
     const absC = Math.abs(c);
     const absD = Math.abs(d);
 
-    // Fast path for typical coordinates
-    if (absA < 46341 && absB < 46341 && absC < 46341 && absD < 46341) {
-      return a * b === c * d;
-    }
-
-    // Extended fast path for safe integer range
+    // Fast path for safe integer range (covers all typical coordinates)
     if (absA < maxDeltaForSafeProduct && absB < maxDeltaForSafeProduct &&
       absC < maxDeltaForSafeProduct && absD < maxDeltaForSafeProduct) {
       return a * b === c * d;
@@ -404,13 +399,14 @@ export namespace InternalClipper {
     return Math.round(val);
   }
 
-  // GetLineIntersectPt - a 'true' result is non-parallel. The 'ip' will also
-  // be constrained to seg1. However, it's possible that 'ip' won't be inside
-  // seg2, even when 'ip' hasn't been constrained (ie 'ip' is inside seg1).
+  // GetLineIntersectPt - returns the intersection point if non-parallel, or null.
+  // The point will be constrained to seg1. However, it's possible that the point
+  // won't be inside seg2, even when it hasn't been constrained (ie inside seg1).
+  // Returns Point64 | null to avoid allocating a wrapper object on every call.
   export function getLineIntersectPt(
     ln1a: Point64, ln1b: Point64, 
     ln2a: Point64, ln2b: Point64
-  ): { intersects: boolean; point: Point64 } {
+  ): Point64 | null {
     const dy1 = (ln1b.y - ln1a.y);
     const dx1 = (ln1b.x - ln1a.x);
     const dy2 = (ln2b.y - ln2a.y);
@@ -418,7 +414,7 @@ export namespace InternalClipper {
     const det = safeMultiplyDifference(dy1, dx2, dy2, dx1);
     
     if (det === 0.0) {
-      return { intersects: false, point: { x: 0, y: 0 } };
+      return null;
     }
 
     const t = safeMultiplyDifference(
@@ -427,25 +423,20 @@ export namespace InternalClipper {
       (ln1a.y - ln2a.y),
       dx2
     ) / det;
-    let ip: Point64;
     
     if (t <= 0.0) {
       // Create a copy to avoid mutating original.
-      ip = { x: ln1a.x, y: ln1a.y };
+      return { x: ln1a.x, y: ln1a.y };
     } else if (t >= 1.0) {
-      ip = { x: ln1b.x, y: ln1b.y };
+      return { x: ln1b.x, y: ln1b.y };
     } else {
       // avoid using constructor (and rounding too) as they affect performance
       // Use Math.trunc to match C# (long) cast behavior which truncates towards zero
-      const rawX = ln1a.x + t * dx1;
-      const rawY = ln1a.y + t * dy1;
-      ip = {
-        x: Math.trunc(rawX),
-        y: Math.trunc(rawY)
+      return {
+        x: Math.trunc(ln1a.x + t * dx1),
+        y: Math.trunc(ln1a.y + t * dy1)
       };
     }
-    
-    return { intersects: true, point: ip };
   }
 
   export function getLineIntersectPtD(

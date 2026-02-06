@@ -49,28 +49,35 @@ clear(): void {
   this.data.length = 0;
 }
 
+// Hole-sift: lift the value once, shift parents/children, then place.
+// Avoids temporary array allocation from destructuring swap on every step.
 private siftUp(index: number): void {
+  const val = this.data[index];
   while (index > 0) {
     const parent = (index - 1) >> 1;
-    if (this.data[parent] >= this.data[index]) break;
-    [this.data[parent], this.data[index]] = [this.data[index], this.data[parent]];
+    if (this.data[parent] >= val) break;
+    this.data[index] = this.data[parent];
     index = parent;
   }
+  this.data[index] = val;
 }
 
 private siftDown(index: number): void {
   const length = this.data.length;
+  const val = this.data[index];
   while (true) {
-    let largest = index;
     const left = (index << 1) + 1;
+    if (left >= length) break;
     const right = left + 1;
-
-    if (left < length && this.data[left] > this.data[largest]) largest = left;
-    if (right < length && this.data[right] > this.data[largest]) largest = right;
-    if (largest === index) break;
-    [this.data[index], this.data[largest]] = [this.data[largest], this.data[index]];
-    index = largest;
+    // Pick the larger child
+    let child = left;
+    if (right < length && this.data[right] > this.data[left]) child = right;
+    // If the larger child isn't greater than val, done
+    if (this.data[child] <= val) break;
+    this.data[index] = this.data[child];
+    index = child;
   }
+  this.data[index] = val;
 }
 }
 
@@ -119,18 +126,14 @@ export interface IntersectNode {
 }
 
 export function createIntersectNode(pt: Point64, edge1: Active, edge2: Active): IntersectNode {
-  // Create a copy of pt to avoid reference sharing (C# uses struct which copies by value).
-  // Avoid eagerly adding a `z` property when it's not present.
-  const z = pt.z;
-  return z !== undefined && z !== 0
-    ? { pt: { x: pt.x, y: pt.y, z }, edge1, edge2 }
-    : { pt: { x: pt.x, y: pt.y }, edge1, edge2 };
+  // In C# this copies pt (struct semantics), but our sole caller (addNewIntersectNode)
+  // always passes a freshly-allocated point that goes out of scope immediately,
+  // so we can take ownership directly and skip the copy.
+  return { pt, edge1, edge2 };
 }
 
 // OutPt: vertex data structure for clipping solutions
 export class OutPt {
-  private static _nextId = 1;
-  public readonly _debugId: number;
   public pt: Point64;
   public next: OutPt | null;
   public prev: OutPt;
@@ -138,7 +141,6 @@ export class OutPt {
   public horz: HorzSegment | null;
 
   constructor(pt: Point64, outrec: OutRec) {
-    this._debugId = OutPt._nextId++;
     this.pt = pt;
     this.outrec = outrec;
     this.next = this;
@@ -152,8 +154,6 @@ export enum HorzPosition { Bottom, Middle, Top }
 
 // OutRec: path data structure for clipping solutions
 export class OutRec {
-  private static _nextId = 1;
-  public readonly _debugId: number;
   public idx: number = 0;
   public owner: OutRec | null = null;
   public frontEdge: Active | null = null;
@@ -165,10 +165,6 @@ export class OutRec {
   public isOpen: boolean = false;
   public splits: number[] | null = null;
   public recursiveSplit: OutRec | null = null;
-
-  constructor() {
-    this._debugId = OutRec._nextId++;
-  }
 }
 
 export class HorzSegment {
@@ -1808,13 +1804,10 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
   }
 
   private addNewIntersectNode(ae1: Active, ae2: Active, topY: number): void {
-    const intersectResult = InternalClipper.getLineIntersectPt(ae1.bot, ae1.top, ae2.bot, ae2.top);
-    let ip: Point64;
+    let ip = InternalClipper.getLineIntersectPt(ae1.bot, ae1.top, ae2.bot, ae2.top);
     
-    if (!intersectResult.intersects) {
+    if (ip === null) {
       ip = { x: ae1.curX, y: topY }; // parallel edges
-    } else {
-      ip = intersectResult.point;
     }
 
     if (ip.y > this.currentBotY || ip.y < topY) {
@@ -2937,6 +2930,7 @@ protected buildTree(polytree: PolyPathBase, solutionOpen: Paths64): void {
 
     let startOp = outrec.pts!;
     let op2: OutPt | null = startOp;
+    let removedAny = false;
     
     while (true) {
       // NB if preserveCollinear == true, then only remove 180 deg. spikes
@@ -2950,6 +2944,7 @@ protected buildTree(polytree: PolyPathBase, solutionOpen: Paths64): void {
           outrec.pts = op2.prev;
         }
         op2 = this.disposeOutPt(op2!);
+        removedAny = true;
         if (!this.isValidClosedPath(op2)) {
           outrec.pts = null;
           return;
@@ -2962,7 +2957,7 @@ protected buildTree(polytree: PolyPathBase, solutionOpen: Paths64): void {
       if (op2 === startOp) break;
     }
     
-    this.fixSelfIntersects(outrec);
+    if (removedAny) this.fixSelfIntersects(outrec);
   }
 
   private isValidClosedPath(op: OutPt | null): boolean {
@@ -3021,10 +3016,10 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
   const nextNextOp = splitOp.next!.next!;
   outrec.pts = prevOp;
 
-  const intersectResult = InternalClipper.getLineIntersectPt(
-    prevOp.pt, splitOp.pt, splitOp.next!.pt, nextNextOp.pt);
-  
-  const ip = intersectResult.point;
+  // doSplitOp is only reached when segments are known to intersect,
+  // so the result is never null here.
+  const ip = InternalClipper.getLineIntersectPt(
+    prevOp.pt, splitOp.pt, splitOp.next!.pt, nextNextOp.pt)!;
 
   const doubleArea1 = ClipperBase.areaOutPt(prevOp);
   const absDoubleArea1 = doubleArea1 < 0n ? -doubleArea1 : doubleArea1;

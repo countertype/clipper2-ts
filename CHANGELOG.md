@@ -2,6 +2,24 @@
 
 All changes to this project will be documented in this file
 
+## [2.0.1-9]
+
+### Quality
+
+- `Engine`: ScanlineHeap siftUp/siftDown now use hole-sift pattern instead of destructuring swap (avoids temporary array allocation per swap step)
+- `Core`: removed redundant `< 46341` fast path in `productsAreEqual` (`maxDeltaForSafeProduct` replaced it)
+
+### Performance
+
+- `Engine`: removed debug ID counters from `OutPt` and `OutRec`
+- `Engine`: `cleanCollinear` now skips `fixSelfIntersects` when no points were actually removed
+- `Offset`: push `pathOut` directly into `solution` instead of spread-cloning it; the array is freshly allocated per output path so the copy was unnecessary
+- `Core`/`Engine`: `getLineIntersectPt` returns `Point64 | null` instead of a `{ intersects, point }` wrapper object, eliminating an allocation on every intersection test
+- `Engine`: `createIntersectNode` takes ownership of the point directly instead of copying it (the caller always passes a fresh allocation)
+- `RectClip`: `getSegmentIntersection` returns `Point64 | null` instead of a wrapper object; `getIntersection` reuses a single result object instead of allocating per call
+- `Triangulation`: `removeEdgeFromVertex` uses swap-with-last-and-pop instead of `splice`
+
+
 ## [2.0.1-8]
 
 ### Fixed

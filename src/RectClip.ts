@@ -239,61 +239,58 @@ export class RectClip64 {
     return pt1.y === pt2.y;
   }
 
-  private static getSegmentIntersection(p1: Point64, p2: Point64, p3: Point64, p4: Point64): { intersects: boolean; point: Point64 } {
+  // Returns the intersection point, or null if segments don't intersect.
+  // Avoids allocating a wrapper object on every call.
+  private static getSegmentIntersection(p1: Point64, p2: Point64, p3: Point64, p4: Point64): Point64 | null {
     const res1 = InternalClipper.crossProductSign(p1, p3, p4);
     const res2 = InternalClipper.crossProductSign(p2, p3, p4);
     
     if (res1 === 0) {
-      const ip = p1;
-      if (res2 === 0) return { intersects: false, point: ip }; // segments are collinear
-      if (Point64Utils.equals(p1, p3) || Point64Utils.equals(p1, p4)) return { intersects: true, point: ip };
+      if (res2 === 0) return null; // segments are collinear
+      if (Point64Utils.equals(p1, p3) || Point64Utils.equals(p1, p4)) return p1;
       if (RectClip64.isHorizontal(p3, p4)) {
-        return { intersects: (p1.x > p3.x) === (p1.x < p4.x), point: ip };
+        return ((p1.x > p3.x) === (p1.x < p4.x)) ? p1 : null;
       }
-      return { intersects: (p1.y > p3.y) === (p1.y < p4.y), point: ip };
+      return ((p1.y > p3.y) === (p1.y < p4.y)) ? p1 : null;
     }
     
     if (res2 === 0) {
-      const ip = p2;
-      if (Point64Utils.equals(p2, p3) || Point64Utils.equals(p2, p4)) return { intersects: true, point: ip };
+      if (Point64Utils.equals(p2, p3) || Point64Utils.equals(p2, p4)) return p2;
       if (RectClip64.isHorizontal(p3, p4)) {
-        return { intersects: (p2.x > p3.x) === (p2.x < p4.x), point: ip };
+        return ((p2.x > p3.x) === (p2.x < p4.x)) ? p2 : null;
       }
-      return { intersects: (p2.y > p3.y) === (p2.y < p4.y), point: ip };
+      return ((p2.y > p3.y) === (p2.y < p4.y)) ? p2 : null;
     }
     
-    if (res1 === res2) {
-      return { intersects: false, point: { x: 0, y: 0 } };
-    }
+    if (res1 === res2) return null;
 
     const res3 = InternalClipper.crossProductSign(p3, p1, p2);
     const res4 = InternalClipper.crossProductSign(p4, p1, p2);
     
     if (res3 === 0) {
-      const ip = p3;
-      if (Point64Utils.equals(p3, p1) || Point64Utils.equals(p3, p2)) return { intersects: true, point: ip };
+      if (Point64Utils.equals(p3, p1) || Point64Utils.equals(p3, p2)) return p3;
       if (RectClip64.isHorizontal(p1, p2)) {
-        return { intersects: (p3.x > p1.x) === (p3.x < p2.x), point: ip };
+        return ((p3.x > p1.x) === (p3.x < p2.x)) ? p3 : null;
       }
-      return { intersects: (p3.y > p1.y) === (p3.y < p2.y), point: ip };
+      return ((p3.y > p1.y) === (p3.y < p2.y)) ? p3 : null;
     }
     
     if (res4 === 0) {
-      const ip = p4;
-      if (Point64Utils.equals(p4, p1) || Point64Utils.equals(p4, p2)) return { intersects: true, point: ip };
+      if (Point64Utils.equals(p4, p1) || Point64Utils.equals(p4, p2)) return p4;
       if (RectClip64.isHorizontal(p1, p2)) {
-        return { intersects: (p4.x > p1.x) === (p4.x < p2.x), point: ip };
+        return ((p4.x > p1.x) === (p4.x < p2.x)) ? p4 : null;
       }
-      return { intersects: (p4.y > p1.y) === (p4.y < p2.y), point: ip };
+      return ((p4.y > p1.y) === (p4.y < p2.y)) ? p4 : null;
     }
     
-    if (res3 === res4) {
-      return { intersects: false, point: { x: 0, y: 0 } };
-    }
+    if (res3 === res4) return null;
 
     // segments must intersect to get here
     return InternalClipper.getLineIntersectPt(p1, p2, p3, p4);
   }
+
+  // Reusable result object for getIntersection (all callers consume immediately).
+  private static readonly _intResult = { intersects: false, point: { x: 0, y: 0 } as Point64, newLocation: Location.inside as Location };
 
   protected static getIntersection(
     rectPath: Path64, 
@@ -303,124 +300,76 @@ export class RectClip64 {
   ): { intersects: boolean; point: Point64; newLocation: Location } {
     // gets the pt of intersection between rectPath and segment(p, p2) that's closest to 'p'
     // when result == false, loc will remain unchanged
-    let ip: Point64 = { x: 0, y: 0 };
-    let newLocation = loc;
+    const r = RectClip64._intResult;
+    let ip: Point64 | null;
+    r.newLocation = loc;
     
     switch (loc) {
       case Location.left:
         {
-          const result1 = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[3]);
-          if (result1.intersects) {
-            ip = result1.point;
-            return { intersects: true, point: ip, newLocation };
-          }
+          ip = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[3]);
+          if (ip !== null) { r.intersects = true; r.point = ip; return r; }
           if (p.y < rectPath[0].y) {
-            const result2 = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[1]);
-            if (result2.intersects) {
-              newLocation = Location.top;
-              return { intersects: true, point: result2.point, newLocation };
-            }
+            ip = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[1]);
+            if (ip !== null) { r.intersects = true; r.point = ip; r.newLocation = Location.top; return r; }
           }
-          const result3 = RectClip64.getSegmentIntersection(p, p2, rectPath[2], rectPath[3]);
-          if (result3.intersects) {
-            newLocation = Location.bottom;
-            return { intersects: true, point: result3.point, newLocation };
-          }
-          return { intersects: false, point: ip, newLocation };
+          ip = RectClip64.getSegmentIntersection(p, p2, rectPath[2], rectPath[3]);
+          if (ip !== null) { r.intersects = true; r.point = ip; r.newLocation = Location.bottom; return r; }
+          r.intersects = false; return r;
         }
 
       case Location.right:
         {
-          const result1 = RectClip64.getSegmentIntersection(p, p2, rectPath[1], rectPath[2]);
-          if (result1.intersects) {
-            return { intersects: true, point: result1.point, newLocation };
-          }
+          ip = RectClip64.getSegmentIntersection(p, p2, rectPath[1], rectPath[2]);
+          if (ip !== null) { r.intersects = true; r.point = ip; return r; }
           if (p.y < rectPath[0].y) {
-            const result2 = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[1]);
-            if (result2.intersects) {
-              newLocation = Location.top;
-              return { intersects: true, point: result2.point, newLocation };
-            }
+            ip = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[1]);
+            if (ip !== null) { r.intersects = true; r.point = ip; r.newLocation = Location.top; return r; }
           }
-          const result3 = RectClip64.getSegmentIntersection(p, p2, rectPath[2], rectPath[3]);
-          if (result3.intersects) {
-            newLocation = Location.bottom;
-            return { intersects: true, point: result3.point, newLocation };
-          }
-          return { intersects: false, point: ip, newLocation };
+          ip = RectClip64.getSegmentIntersection(p, p2, rectPath[2], rectPath[3]);
+          if (ip !== null) { r.intersects = true; r.point = ip; r.newLocation = Location.bottom; return r; }
+          r.intersects = false; return r;
         }
 
       case Location.top:
         {
-          const result1 = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[1]);
-          if (result1.intersects) {
-            return { intersects: true, point: result1.point, newLocation };
-          }
+          ip = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[1]);
+          if (ip !== null) { r.intersects = true; r.point = ip; return r; }
           if (p.x < rectPath[0].x) {
-            const result2 = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[3]);
-            if (result2.intersects) {
-              newLocation = Location.left;
-              return { intersects: true, point: result2.point, newLocation };
-            }
+            ip = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[3]);
+            if (ip !== null) { r.intersects = true; r.point = ip; r.newLocation = Location.left; return r; }
           }
-          if (p.x <= rectPath[1].x) {
-            return { intersects: false, point: ip, newLocation };
-          }
-          const result3 = RectClip64.getSegmentIntersection(p, p2, rectPath[1], rectPath[2]);
-          if (result3.intersects) {
-            newLocation = Location.right;
-            return { intersects: true, point: result3.point, newLocation };
-          }
-          return { intersects: false, point: ip, newLocation };
+          if (p.x <= rectPath[1].x) { r.intersects = false; return r; }
+          ip = RectClip64.getSegmentIntersection(p, p2, rectPath[1], rectPath[2]);
+          if (ip !== null) { r.intersects = true; r.point = ip; r.newLocation = Location.right; return r; }
+          r.intersects = false; return r;
         }
 
       case Location.bottom:
         {
-          const result1 = RectClip64.getSegmentIntersection(p, p2, rectPath[2], rectPath[3]);
-          if (result1.intersects) {
-            return { intersects: true, point: result1.point, newLocation };
-          }
+          ip = RectClip64.getSegmentIntersection(p, p2, rectPath[2], rectPath[3]);
+          if (ip !== null) { r.intersects = true; r.point = ip; return r; }
           if (p.x < rectPath[3].x) {
-            const result2 = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[3]);
-            if (result2.intersects) {
-              newLocation = Location.left;
-              return { intersects: true, point: result2.point, newLocation };
-            }
+            ip = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[3]);
+            if (ip !== null) { r.intersects = true; r.point = ip; r.newLocation = Location.left; return r; }
           }
-          if (p.x <= rectPath[2].x) {
-            return { intersects: false, point: ip, newLocation };
-          }
-          const result3 = RectClip64.getSegmentIntersection(p, p2, rectPath[1], rectPath[2]);
-          if (result3.intersects) {
-            newLocation = Location.right;
-            return { intersects: true, point: result3.point, newLocation };
-          }
-          return { intersects: false, point: ip, newLocation };
+          if (p.x <= rectPath[2].x) { r.intersects = false; return r; }
+          ip = RectClip64.getSegmentIntersection(p, p2, rectPath[1], rectPath[2]);
+          if (ip !== null) { r.intersects = true; r.point = ip; r.newLocation = Location.right; return r; }
+          r.intersects = false; return r;
         }
 
       default:
         {
-          const result1 = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[3]);
-          if (result1.intersects) {
-            newLocation = Location.left;
-            return { intersects: true, point: result1.point, newLocation };
-          }
-          const result2 = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[1]);
-          if (result2.intersects) {
-            newLocation = Location.top;
-            return { intersects: true, point: result2.point, newLocation };
-          }
-          const result3 = RectClip64.getSegmentIntersection(p, p2, rectPath[1], rectPath[2]);
-          if (result3.intersects) {
-            newLocation = Location.right;
-            return { intersects: true, point: result3.point, newLocation };
-          }
-          const result4 = RectClip64.getSegmentIntersection(p, p2, rectPath[2], rectPath[3]);
-          if (result4.intersects) {
-            newLocation = Location.bottom;
-            return { intersects: true, point: result4.point, newLocation };
-          }
-          return { intersects: false, point: ip, newLocation };
+          ip = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[3]);
+          if (ip !== null) { r.intersects = true; r.point = ip; r.newLocation = Location.left; return r; }
+          ip = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[1]);
+          if (ip !== null) { r.intersects = true; r.point = ip; r.newLocation = Location.top; return r; }
+          ip = RectClip64.getSegmentIntersection(p, p2, rectPath[1], rectPath[2]);
+          if (ip !== null) { r.intersects = true; r.point = ip; r.newLocation = Location.right; return r; }
+          ip = RectClip64.getSegmentIntersection(p, p2, rectPath[2], rectPath[3]);
+          if (ip !== null) { r.intersects = true; r.point = ip; r.newLocation = Location.bottom; return r; }
+          r.intersects = false; return r;
         }
     }
   }

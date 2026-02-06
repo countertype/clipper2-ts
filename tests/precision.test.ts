@@ -212,8 +212,8 @@ describe('InternalClipper precision with large safe integers', () => {
     const ln2a: Point64 = { x: 0, y: 0 };
     const ln2b: Point64 = { x: 2 * x + 1, y: 2 * x + 3 };
 
-    const { intersects, point } = InternalClipper.getLineIntersectPt(ln1a, ln1b, ln2a, ln2b);
-    expect(intersects).toBe(true);
+    const point = InternalClipper.getLineIntersectPt(ln1a, ln1b, ln2a, ln2b);
+    expect(point).not.toBeNull();
     expect(point).toEqual({ x: 0, y: 0 });
   });
 
@@ -264,9 +264,9 @@ describe('InternalClipper precision with large safe integers', () => {
       { x: 0, y: huge * 2 }, { x: huge * 2, y: 0 }
     );
     
-    expect(res.intersects).toBe(true);
-    expect(res.point.x).toBeCloseTo(huge, -1);
-    expect(res.point.y).toBeCloseTo(huge, -1);
+    expect(res).not.toBeNull();
+    expect(res!.x).toBeCloseTo(huge, -1);
+    expect(res!.y).toBeCloseTo(huge, -1);
   });
 
   test('multiplyUInt64 returns correct hi/lo for safe inputs', () => {
