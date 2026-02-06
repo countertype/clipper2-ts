@@ -385,20 +385,11 @@ function dotProductD(vec1: PointD, vec2: PointD): number {
   return (vec1.x * vec2.x + vec1.y * vec2.y);
 }
 
-// Banker's rounding (round half to even) to match C# MidpointRounding.ToEven
+// Banker's rounding (round half to even) to match C# MidpointRounding.ToEven.
 function roundToEven(value: number): number {
-  // Use the built-in behavior that's closer to C# MidpointRounding.ToEven
-  // JavaScript's Math.round actually implements "round half away from zero"
-  // but for most practical cases, the difference is minimal
-  const floor = Math.floor(value);
-  const diff = value - floor;
-  
-  if (Math.abs(diff - 0.5) < 1e-10) {
-    // Exactly halfway - round to even
-    return floor % 2 === 0 ? floor : floor + 1;
-  }
-  
-  return Math.round(value);
+  const r = Math.round(value);
+  if (value === r - 0.5 && (r & 1) !== 0) return r - 1;
+  return r;
 }
 
 function checkCastInt64(val: number): number {

@@ -788,11 +788,13 @@ private static topX(ae: Active, currentY: number): number {
     this.scanlineHeap.push(y);
   }
 
-  private popScanline(): { success: boolean; y: number } {
+  // Returns the next scanline Y value, or null if empty.
+  // Avoids allocating a wrapper object on every call in the main sweep loop.
+  private popScanline(): number | null {
     if (this.useScanlineArray) {
       const arr = this.scanlineArr;
       const len = arr.length;
-      if (len === 0) return { success: false, y: 0 };
+      if (len === 0) return null;
       let bestIdx = 0;
       let bestY = arr[0];
       for (let i = 1; i < len; i++) {
@@ -804,12 +806,12 @@ private static topX(ae: Active, currentY: number): number {
       }
       arr[bestIdx] = arr[len - 1];
       arr.pop();
-      return { success: true, y: bestY };
+      return bestY;
     }
     const y = this.scanlineHeap.pop();
-    if (y === null) return { success: false, y: 0 };
+    if (y === null) return null;
     this.scanlineSet.delete(y);
-    return { success: true, y };
+    return y;
   }
 
   private hasLocMinAtY(y: number): boolean {
@@ -887,9 +889,8 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
   this.cliptype = ct;
   this.reset();
   
-  const scanResult = this.popScanline();
-  if (!scanResult.success) return;
-  let y = scanResult.y;
+  let y = this.popScanline();
+  if (y === null) return;
   
   while (this.succeeded) {
     this.insertLocalMinimaIntoAEL(y);
@@ -900,9 +901,9 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       this.horzSegList.length = 0;
     }
     this.currentBotY = y; // bottom of scanbeam
-    const nextScanResult = this.popScanline();
-    if (!nextScanResult.success) break; // y new top of scanbeam
-    y = nextScanResult.y;
+    const nextY = this.popScanline();
+    if (nextY === null) break; // y new top of scanbeam
+    y = nextY;
     this.doIntersections(y);
     this.doTopOfScanbeam(y);
     while ((ae = this.popHorz()) !== null) this.doHorizontal(ae);
