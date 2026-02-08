@@ -21,6 +21,10 @@ import { RectClip64, RectClipLines64 } from './RectClip.js';
 import { Minkowski } from './Minkowski.js';
 import { Delaunay, TriangulateResult } from './Triangulation.js';
 
+// BigInt constant — avoid BigInt literal syntax (0n) to sidestep
+// terser BigInt constant-folding issues in some consuming build setups.
+const B2 = BigInt(2);
+
 // Constants
 export const invalidRect64 = InvalidRect64;
 export const invalidRectD = InvalidRectD;
@@ -629,8 +633,8 @@ export function midPoint(pt1: Point64, pt2: Point64): Point64 {
       (Math.abs(pt1.x) + Math.abs(pt2.x) > Number.MAX_SAFE_INTEGER ||
        Math.abs(pt1.y) + Math.abs(pt2.y) > Number.MAX_SAFE_INTEGER)) {
     return { 
-      x: Number((BigInt(pt1.x) + BigInt(pt2.x)) / 2n),
-      y: Number((BigInt(pt1.y) + BigInt(pt2.y)) / 2n)
+      x: Number((BigInt(pt1.x) + BigInt(pt2.x)) / B2),
+      y: Number((BigInt(pt1.y) + BigInt(pt2.y)) / B2)
     };
   }
   return { x: Math.round((pt1.x + pt2.x) / 2), y: Math.round((pt1.y + pt2.y) / 2) };
