@@ -2,6 +2,12 @@
 
 All changes to this project will be documented in this file
 
+## [2.0.1-10]
+
+### Fixed
+
+- Build/minifier compatibility: replaced BigInt literal syntax (eg `0n`) with cached `BigInt()` constants to avoid a `compress.evaluate` error in some consuming pipelines and terser versions
+
 ## [2.0.1-9]
 
 ### Quality

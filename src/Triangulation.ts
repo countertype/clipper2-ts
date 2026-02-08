@@ -10,6 +10,10 @@
 
 import { Point64, Path64, Paths64, InternalClipper } from './Core.js';
 
+// BigInt constant — avoid BigInt literal syntax (0n) to sidestep
+// terser BigInt constant-folding issues in some consuming build setups.
+const B0 = BigInt(0);
+
 export enum TriangulateResult {
   success,
   fail,
@@ -988,8 +992,8 @@ export class Delaunay {
     const cliftBig = cxBig * cxBig + cyBig * cyBig;
 
     const result = aliftBig * bcdetBig + bliftBig * cadetBig + cliftBig * abdetBig;
-    if (result > 0n) return 1;
-    if (result < 0n) return -1;
+    if (result > B0) return 1;
+    if (result < B0) return -1;
     return 0;
   }
 
@@ -1182,8 +1186,8 @@ export class Delaunay {
       const clift = cx * cx + cy * cy;
 
       const result = alift * bcdet + blift * cadet + clift * abdet;
-      if (result > 0n) return 1;
-      if (result < 0n) return -1;
+      if (result > B0) return 1;
+      if (result < B0) return -1;
       return 0;
     }
 
@@ -1212,7 +1216,7 @@ export class Delaunay {
       const qNum = ax * dx + ay * dy;
       const denom = dx * dx + dy * dy;
 
-      if (qNum < 0n) return Delaunay.distanceSqr(pt, segPt1);
+      if (qNum < B0) return Delaunay.distanceSqr(pt, segPt1);
       if (qNum > denom) return Delaunay.distanceSqr(pt, segPt2);
 
       const cross = ax * dy - dx * ay;
@@ -1269,26 +1273,26 @@ export class Delaunay {
       const dx2 = BigInt(s2b.x) - BigInt(s2a.x);
 
       const cp = dy1 * dx2 - dy2 * dx1;
-      if (cp === 0n) return IntersectKind.collinear;
+      if (cp === B0) return IntersectKind.collinear;
 
       let t = (BigInt(s1a.x) - BigInt(s2a.x)) * dy2 -
         (BigInt(s1a.y) - BigInt(s2a.y)) * dx2;
 
-      if (t === 0n) return IntersectKind.none;
-      if (t > 0n) {
-        if (cp < 0n || t >= cp) return IntersectKind.none;
+      if (t === B0) return IntersectKind.none;
+      if (t > B0) {
+        if (cp < B0 || t >= cp) return IntersectKind.none;
       } else {
-        if (cp > 0n || t <= cp) return IntersectKind.none;
+        if (cp > B0 || t <= cp) return IntersectKind.none;
       }
 
       t = (BigInt(s1a.x) - BigInt(s2a.x)) * dy1 -
         (BigInt(s1a.y) - BigInt(s2a.y)) * dx1;
 
-      if (t === 0n) return IntersectKind.none;
-      if (t > 0n) {
-        if (cp > 0n && t < cp) return IntersectKind.intersect;
+      if (t === B0) return IntersectKind.none;
+      if (t > B0) {
+        if (cp > B0 && t < cp) return IntersectKind.intersect;
       } else {
-        if (cp < 0n && t > cp) return IntersectKind.intersect;
+        if (cp < B0 && t > cp) return IntersectKind.intersect;
       }
 
       return IntersectKind.none;

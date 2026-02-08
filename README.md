@@ -104,6 +104,12 @@ Unlike C# Clipper2, which has full int64 support, this library uses JavaScript's
 
 If you have a use case that requires the full 64-bit range, and Clipper2-WASM isn't an option, please open an issue and we can discuss!
 
+### Bundlers / minifiers (terser)
+
+This library uses `BigInt` internally. Some versions/configurations of terser have had issues when compressing `BigInt` literals (eg `0n`). `clipper2-ts` avoids BigInt literal syntax in its source to improve compatibility
+
+If you still hit terser issues in a consuming build, one workaround is `terserOptions: { compress: { evaluate: false } }`.
+
 ## Performance 
 
 Faster than JavaScript-based Clipper (Clipper1) ports, slower than Clipper2-WASM; choose based on your constraints

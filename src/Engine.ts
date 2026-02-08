@@ -14,6 +14,12 @@ import {
     InternalClipper, Rect64Utils
   } from './Core.js';
 
+// BigInt constants — avoid BigInt literal syntax (0n, 4n, etc.) to sidestep
+// terser BigInt constant-folding issues in some consuming build setups.
+const B0 = BigInt(0);
+const B2 = BigInt(2);
+const B4 = BigInt(4);
+
 // Vertex: a pre-clipping data structure. It is used to separate polygons
 // into ascending and descending 'bounds' (or sides) that start at local
 // minima and ascend to a local maxima, before descending again.
@@ -2297,7 +2303,7 @@ protected newOutRec(): OutRec {
       const cross = (BigInt(a) * BigInt(d)) - (BigInt(c) * BigInt(b));
       const crossSq = cross * cross;
       const denom = (BigInt(c) * BigInt(c)) + (BigInt(d) * BigInt(d));
-      return 4n * crossSq > denom;
+      return B4 * crossSq > denom;
     }
     // Fallback for non-integer coords
     const cross = (a * d) - (c * b);
@@ -3024,15 +3030,15 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
     prevOp.pt, splitOp.pt, splitOp.next!.pt, nextNextOp.pt)!;
 
   const doubleArea1 = ClipperBase.areaOutPt(prevOp);
-  const absDoubleArea1 = doubleArea1 < 0n ? -doubleArea1 : doubleArea1;
+  const absDoubleArea1 = doubleArea1 < B0 ? -doubleArea1 : doubleArea1;
   
-  if (absDoubleArea1 < 4n) { // area < 2
+  if (absDoubleArea1 < B4) { // area < 2
     outrec.pts = null;
     return;
   }
 
   const doubleArea2 = this.areaTriangle(ip, splitOp.pt, splitOp.next!.pt);
-  const absDoubleArea2 = doubleArea2 < 0n ? -doubleArea2 : doubleArea2;
+  const absDoubleArea2 = doubleArea2 < B0 ? -doubleArea2 : doubleArea2;
 
   // de-link splitOp and splitOp.next from the path
   // while inserting the intersection point
@@ -3047,9 +3053,9 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
     prevOp.next = newOp2;
   }
 
-  if (!(absDoubleArea2 > 2n) || // area > 1
+  if (!(absDoubleArea2 > B2) || // area > 1
       (!(absDoubleArea2 > absDoubleArea1) &&
-        ((doubleArea2 > 0n) !== (doubleArea1 > 0n)))) return;
+        ((doubleArea2 > B0) !== (doubleArea1 > B0)))) return;
         
   const newOutRec = this.newOutRec();
   newOutRec.owner = outrec.owner;
@@ -3095,7 +3101,7 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
       return BigInt(Math.round(area));
     }
 
-    let areaBig = 0n;
+    let areaBig = B0;
     op2 = op;
     do {
       const prev = op2.prev;

@@ -141,9 +141,17 @@ function safeMultiplySum(a: number, b: number, c: number, d: number): number {
   return (a * b) + (c * d);
 }
 
+// BigInt constants — avoid BigInt literal syntax (0n, 4n, etc.) to sidestep
+// terser BigInt constant-folding issues in some consuming build setups.
+const B0 = BigInt(0);
+const B2 = BigInt(2);
+const B4 = BigInt(4);
+const B64 = BigInt(64);
+const UINT64_MASK = BigInt("0xFFFFFFFFFFFFFFFF");
+
 // --- public constants (module-level for cross-referencing) ---
-const IC_MaxInt64 = 9223372036854775807n;
-const IC_MaxCoord = Number(IC_MaxInt64 / 4n);
+const IC_MaxInt64 = BigInt("9223372036854775807");
+const IC_MaxCoord = Number(IC_MaxInt64 / B4);
 const IC_Invalid64 = Number(IC_MaxInt64);
 const IC_floatingPointTolerance = 1E-12;
 const IC_defaultMinimumEdgeLength = 0.1;
@@ -244,8 +252,8 @@ function multiplyUInt64(a: number, b: number): UInt128Struct {
   const res = aBig * bBig;
   
   return {
-    lo64: res & 0xFFFFFFFFFFFFFFFFn,
-    hi64: res >> 64n
+    lo64: res & UINT64_MASK,
+    hi64: res >> B64
   };
 }
 
@@ -324,8 +332,8 @@ function dotProductSign(pt1: Point64, pt2: Point64, pt3: Point64): number {
   }
 
   const bigSum = (BigInt(a) * BigInt(b)) + (BigInt(c) * BigInt(d));
-  if (bigSum === 0n) return 0;
-  return bigSum > 0n ? 1 : -1;
+  if (bigSum === B0) return 0;
+  return bigSum > B0 ? 1 : -1;
 }
 
 function icArea(path: Path64): number {
@@ -357,7 +365,7 @@ function icArea(path: Path64): number {
   }
 
   // Safe path - use BigInt for accumulation
-  let totalBig = 0n;
+  let totalBig = B0;
   for (const pt of path) {
     const sum = prevPt.y + pt.y;
     const diff = prevPt.x - pt.x;
@@ -626,8 +634,8 @@ function path2ContainsPath1(path1: Path64, path2: Path64): boolean {
   let midX: number, midY: number;
   if (Number.isSafeInteger(mp.left) && Number.isSafeInteger(mp.right) &&
       Math.abs(mp.left) + Math.abs(mp.right) > Number.MAX_SAFE_INTEGER) {
-    midX = Number((BigInt(mp.left) + BigInt(mp.right)) / 2n);
-    midY = Number((BigInt(mp.top) + BigInt(mp.bottom)) / 2n);
+    midX = Number((BigInt(mp.left) + BigInt(mp.right)) / B2);
+    midY = Number((BigInt(mp.top) + BigInt(mp.bottom)) / B2);
   } else {
     midX = Math.round((mp.left + mp.right) / 2);
     midY = Math.round((mp.top + mp.bottom) / 2);
@@ -801,8 +809,8 @@ export const Rect64Utils = {
   midPoint(rect: Rect64): Point64 {
     if (Number.isSafeInteger(rect.left) && Number.isSafeInteger(rect.right) &&
         Math.abs(rect.left) + Math.abs(rect.right) > Number.MAX_SAFE_INTEGER) {
-      const midX = Number((BigInt(rect.left) + BigInt(rect.right)) / 2n);
-      const midY = Number((BigInt(rect.top) + BigInt(rect.bottom)) / 2n);
+      const midX = Number((BigInt(rect.left) + BigInt(rect.right)) / B2);
+      const midY = Number((BigInt(rect.top) + BigInt(rect.bottom)) / B2);
       return { x: midX, y: midY };
     }
     return {
