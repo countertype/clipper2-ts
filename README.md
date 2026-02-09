@@ -108,7 +108,7 @@ If you have a use case that requires the full 64-bit range, and Clipper2-WASM is
 
 This library uses `BigInt` internally. Some versions/configurations of terser have had issues when compressing `BigInt` literals (eg `0n`). `clipper2-ts` avoids BigInt literal syntax in its source to improve compatibility
 
-If you still hit terser issues in a consuming build, one workaround is `terserOptions: { compress: { evaluate: false } }`.
+If you still hit terser issues in a consuming build, one workaround is `terserOptions: { compress: { evaluate: false } }`
 
 ## Performance 
 

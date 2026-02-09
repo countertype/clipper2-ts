@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Clipper64, ClipperD, ClipType, FillRule, Point64, PointD, Paths64, PathsD, ZCallback64, ZCallbackD } from '../src/index';
+import { Clipper64, ClipperD, ClipType, FillRule, Point64, PointD, Paths64, PathsD, ZCallback64, ZCallbackD, ClipperOffset, JoinType, EndType } from '../src/index';
 import { Clipper } from '../src/Clipper';
 
 /**
@@ -156,6 +156,139 @@ describe('Z Callback Tests (PointD)', () => {
     // Should execute without error
     expect(solution).toBeDefined();
     expect(solution.length).toBeGreaterThan(0);
+  });
+});
+
+describe('Offset Z propagation', () => {
+  // Z values on input points should survive through all offset join types.
+  // The C# reference does this via #if USINGZ blocks in each join function;
+  // we always carry Z (single-build), so every output point from offset
+  // should inherit Z from its source vertex.
+
+  const square: Paths64 = [[
+    { x: 0, y: 0, z: 42 },
+    { x: 100, y: 0, z: 42 },
+    { x: 100, y: 100, z: 42 },
+    { x: 0, y: 100, z: 42 }
+  ]];
+
+  function allZ(paths: Paths64): number[] {
+    return paths.flatMap(p => p.map(pt => pt.z || 0));
+  }
+
+  it('should preserve Z through Miter offset', () => {
+    const solution: Paths64 = [];
+    const co = new ClipperOffset();
+    co.addPaths(square, JoinType.Miter, EndType.Polygon);
+    co.execute(10, solution);
+
+    expect(solution.length).toBeGreaterThan(0);
+    const zValues = allZ(solution);
+    expect(zValues.length).toBeGreaterThan(0);
+    for (const z of zValues) {
+      expect(z).toBe(42);
+    }
+  });
+
+  it('should preserve Z through Square offset', () => {
+    const solution: Paths64 = [];
+    const co = new ClipperOffset();
+    co.addPaths(square, JoinType.Square, EndType.Polygon);
+    co.execute(10, solution);
+
+    expect(solution.length).toBeGreaterThan(0);
+    const zValues = allZ(solution);
+    expect(zValues.length).toBeGreaterThan(0);
+    for (const z of zValues) {
+      expect(z).toBe(42);
+    }
+  });
+
+  it('should preserve Z through Bevel offset', () => {
+    const solution: Paths64 = [];
+    const co = new ClipperOffset();
+    co.addPaths(square, JoinType.Bevel, EndType.Polygon);
+    co.execute(10, solution);
+
+    expect(solution.length).toBeGreaterThan(0);
+    const zValues = allZ(solution);
+    expect(zValues.length).toBeGreaterThan(0);
+    for (const z of zValues) {
+      expect(z).toBe(42);
+    }
+  });
+
+  it('should preserve Z through Round offset', () => {
+    const solution: Paths64 = [];
+    const co = new ClipperOffset();
+    co.addPaths(square, JoinType.Round, EndType.Polygon);
+    co.execute(10, solution);
+
+    expect(solution.length).toBeGreaterThan(0);
+    const zValues = allZ(solution);
+    expect(zValues.length).toBeGreaterThan(0);
+    for (const z of zValues) {
+      expect(z).toBe(42);
+    }
+  });
+
+  it('should preserve Z through open path offset', () => {
+    const openPath: Paths64 = [[
+      { x: 0, y: 50, z: 7 },
+      { x: 50, y: 50, z: 7 },
+      { x: 100, y: 50, z: 7 }
+    ]];
+
+    const solution: Paths64 = [];
+    const co = new ClipperOffset();
+    co.addPaths(openPath, JoinType.Round, EndType.Round);
+    co.execute(10, solution);
+
+    expect(solution.length).toBeGreaterThan(0);
+    const zValues = allZ(solution);
+    expect(zValues.length).toBeGreaterThan(0);
+    for (const z of zValues) {
+      expect(z).toBe(7);
+    }
+  });
+
+  it('should preserve Z through single-point offset', () => {
+    const point: Paths64 = [[{ x: 50, y: 50, z: 99 }]];
+
+    const solution: Paths64 = [];
+    const co = new ClipperOffset();
+    co.addPaths(point, JoinType.Round, EndType.Round);
+    co.execute(10, solution);
+
+    expect(solution.length).toBeGreaterThan(0);
+    const zValues = allZ(solution);
+    expect(zValues.length).toBeGreaterThan(0);
+    for (const z of zValues) {
+      expect(z).toBe(99);
+    }
+  });
+
+  it('should preserve per-vertex Z through offset', () => {
+    // Each vertex has a different Z; output points should inherit
+    // from the source vertex that generated them.
+    const tri: Paths64 = [[
+      { x: 0, y: 0, z: 1 },
+      { x: 100, y: 0, z: 2 },
+      { x: 50, y: 100, z: 3 }
+    ]];
+
+    const solution: Paths64 = [];
+    const co = new ClipperOffset();
+    co.addPaths(tri, JoinType.Miter, EndType.Polygon);
+    co.execute(10, solution);
+
+    expect(solution.length).toBeGreaterThan(0);
+    const zValues = allZ(solution);
+    expect(zValues.length).toBeGreaterThan(0);
+    // Every output Z should be one of the input Z values (1, 2, or 3)
+    for (const z of zValues) {
+      expect([1, 2, 3]).toContain(z);
+    }
   });
 });
 

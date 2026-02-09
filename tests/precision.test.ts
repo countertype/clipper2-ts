@@ -214,7 +214,7 @@ describe('InternalClipper precision with large safe integers', () => {
 
     const point = InternalClipper.getLineIntersectPt(ln1a, ln1b, ln2a, ln2b);
     expect(point).not.toBeNull();
-    expect(point).toEqual({ x: 0, y: 0 });
+    expect(point).toEqual({ x: 0, y: 0, z: 0 });
   });
 
   test('segsIntersect handles large coordinates', () => {

@@ -2,6 +2,13 @@
 
 All changes to this project will be documented in this file
 
+## [2.0.1-11]
+
+### Fixed
+
+- `Offset`: Z now propagates through all join types, open path caps, and single-point offsets
+- `Core`: `getLineIntersectPt` endpoint copies now carry Z
+
 ## [2.0.1-10]
 
 ### Fixed

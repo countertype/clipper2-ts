@@ -431,16 +431,17 @@ function getLineIntersectPt(
   ) / det;
   
   if (t <= 0.0) {
-    // Create a copy to avoid mutating original.
-    return { x: ln1a.x, y: ln1a.y };
+    // Create a copy to avoid mutating original (struct copy in C# carries Z).
+    return { x: ln1a.x, y: ln1a.y, z: (ln1a.z || 0) };
   } else if (t >= 1.0) {
-    return { x: ln1b.x, y: ln1b.y };
+    return { x: ln1b.x, y: ln1b.y, z: (ln1b.z || 0) };
   } else {
     // avoid using constructor (and rounding too) as they affect performance
     // Use Math.trunc to match C# (long) cast behavior which truncates towards zero
     return {
       x: Math.trunc(ln1a.x + t * dx1),
-      y: Math.trunc(ln1a.y + t * dy1)
+      y: Math.trunc(ln1a.y + t * dy1),
+      z: 0
     };
   }
 }
