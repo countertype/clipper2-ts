@@ -274,7 +274,7 @@ export class ClipperOffset {
   }
 
   private static hypotenuse(x: number, y: number): number {
-    return Math.sqrt(Math.pow(x, 2) + Math.pow(y, 2));
+    return Math.sqrt(x * x + y * y);
   }
 
   private static normalizeVector(vec: PointD): PointD {
