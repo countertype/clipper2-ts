@@ -565,30 +565,6 @@ export class Delaunay {
     return this.createEdge(vBest, vAbove, EdgeKind.loose);
   }
 
-  private horizontalBetween(v1: Vertex2, v2: Vertex2): Edge | null {
-    const y = v1.pt.y;
-    let l: number;
-    let r: number;
-
-    if (v1.pt.x > v2.pt.x) {
-      l = v2.pt.x;
-      r = v1.pt.x;
-    } else {
-      l = v1.pt.x;
-      r = v2.pt.x;
-    }
-
-    let res: Edge | null = this.firstActive;
-    while (res !== null) {
-      if (res.vL.pt.y === y && res.vR.pt.y === y &&
-        res.vL.pt.x >= l && res.vR.pt.x <= r &&
-        (res.vL.pt.x !== l || res.vL.pt.x !== r))
-        break;
-
-      res = res.nextE;
-    }
-    return res;
-  }
 
   private doTriangulateLeft(edge: Edge, pivot: Vertex2, minY: number): void {
     let vAlt: Vertex2 | null = null;
@@ -622,10 +598,6 @@ export class Delaunay {
 
     let eX = Delaunay.findLinkingEdge(vAlt, v, (vAlt.pt.y < v.pt.y));
     if (eX === null) {
-      if (vAlt.pt.y === v.pt.y && v.pt.y === minY &&
-        this.horizontalBetween(vAlt, v) !== null)
-        return;
-
       eX = this.createEdge(vAlt, v, EdgeKind.loose);
     }
 
@@ -667,10 +639,6 @@ export class Delaunay {
 
     let eX = Delaunay.findLinkingEdge(vAlt, v, (vAlt.pt.y > v.pt.y));
     if (eX === null) {
-      if (vAlt.pt.y === v.pt.y && v.pt.y === minY &&
-        this.horizontalBetween(vAlt, v) !== null)
-        return;
-
       eX = this.createEdge(vAlt, v, EdgeKind.loose);
     }
 

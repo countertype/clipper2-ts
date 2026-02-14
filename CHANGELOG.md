@@ -2,6 +2,16 @@
 
 All changes to this project will be documented in this file
 
+## [2.0.1-12]
+
+### Changed
+
+- `Triangulation`: removed dead `horizontalBetween` checks (never reached in practice)
+
+### Performance
+
+- `Offset`: `hypotenuse` uses `x * x` instead of `Math.pow(x, 2)`
+
 ## [2.0.1-11]
 
 ### Fixed

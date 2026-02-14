@@ -1,123 +1,104 @@
 import { performance } from 'node:perf_hooks';
 
-const DEFAULT_SAMPLE_COUNT = Number(process.env.BENCH_SAMPLES ?? '25');
-const DEFAULT_WARMUP_COUNT = Number(process.env.BENCH_WARMUP ?? '5');
-const DEFAULT_ALPHA = Number(process.env.BENCH_ALPHA ?? '0.05');
+const DEFAULT_SAMPLES = Number(process.env.BENCH_SAMPLES ?? '500');
+const DEFAULT_WARMUP = Number(process.env.BENCH_WARMUP ?? '200');
+const PAD = 48;
 
-type Samples = number[];
+function mean(arr: Float64Array): number {
+  let s = 0;
+  for (let i = 0; i < arr.length; i++) s += arr[i];
+  return s / arr.length;
+}
+
+function variance(arr: Float64Array, m: number): number {
+  let s = 0;
+  for (let i = 0; i < arr.length; i++) { const d = arr[i] - m; s += d * d; }
+  return s / (arr.length - 1);
+}
+
+// Abramowitz & Stegun 7.1.26
+function normCDF(x: number): number {
+  const a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741;
+  const a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+  const sgn = x < 0 ? -1 : 1;
+  x = Math.abs(x) / Math.SQRT2;
+  const t = 1 / (1 + p * x);
+  const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
+  return 0.5 * (1 + sgn * y);
+}
+
+// Cornish-Fisher approximation, accurate for df > 5
+function tCDF(t: number, df: number): number {
+  const g1 = 1 / (4 * df);
+  return normCDF(t * (1 - g1));
+}
+
+// Expects equal-length sample arrays
+function pairedTest(a: Float64Array, b: Float64Array): {
+  meanDiff: number; ci: number; t: number; df: number; p: number; se: number;
+} {
+  const n = a.length;
+  const diffs = new Float64Array(n);
+  for (let i = 0; i < n; i++) diffs[i] = a[i] - b[i];
+  const m = mean(diffs);
+  const v = variance(diffs, m);
+  const se = Math.sqrt(v / n);
+  const t = se > 0 ? m / se : 0;
+  const df = n - 1;
+  const p = 2 * (1 - tCDF(Math.abs(t), df));
+  const tCrit = 1.96 + 2.4 / df;
+  const ci = tCrit * se;
+  return { meanDiff: m, ci, t, df, p, se };
+}
+
+function time(fn: () => void): number {
+  const start = performance.now();
+  fn();
+  return performance.now() - start;
+}
 
 export function logBenchStatsHeader(
-  sampleCount: number = DEFAULT_SAMPLE_COUNT,
-  warmupCount: number = DEFAULT_WARMUP_COUNT,
-  alpha: number = DEFAULT_ALPHA
+  samples: number = DEFAULT_SAMPLES,
+  warmup: number = DEFAULT_WARMUP
 ): void {
   console.log(
-    `[bench] samples=${sampleCount} warmup=${warmupCount} alpha=${alpha}`
+    `[bench] ${warmup} warmup + ${samples} samples | paired t-test`
   );
 }
 
+// Runs fn as both A and B with paired, alternating-order sampling.
+// Significance (*, **, ***) indicates measurement drift, not a real difference
 export function runStabilityCheck(
   name: string,
   fn: () => void,
-  sampleCount: number = DEFAULT_SAMPLE_COUNT,
-  warmupCount: number = DEFAULT_WARMUP_COUNT,
-  alpha: number = DEFAULT_ALPHA
+  samples: number = DEFAULT_SAMPLES,
+  warmup: number = DEFAULT_WARMUP
 ): void {
-  const a = collectSamples(fn, warmupCount, sampleCount);
-  const b = collectSamples(fn, warmupCount, sampleCount);
-  const report = welchTTest(a, b);
+  for (let i = 0; i < warmup; i++) { fn(); fn(); }
 
-  const meanA = mean(a);
-  const meanB = mean(b);
-  const diff = meanB - meanA;
-  const rel = meanA === 0 ? 0 : (diff / meanA) * 100;
-  const sig = report.pValue < alpha ? 'sig' : 'ns';
+  const tA = new Float64Array(samples);
+  const tB = new Float64Array(samples);
+
+  // Alternate order to cancel out thermal and JIT drift
+  for (let i = 0; i < samples; i++) {
+    if (i & 1) { tB[i] = time(fn); tA[i] = time(fn); }
+    else       { tA[i] = time(fn); tB[i] = time(fn); }
+  }
+
+  const mA = mean(tA), mB = mean(tB);
+  const res = pairedTest(tA, tB);
+  const pct = mA === 0 ? 0 : ((mB - mA) / mA * 100);
+  const sig = res.p < 0.001 ? '***' : res.p < 0.01 ? '**' : res.p < 0.05 ? '*' : ' ns';
+  const pStr = res.p < 0.0001 ? '<0.0001' : res.p.toFixed(4);
+  const loCI = ((res.meanDiff - res.ci) * 1000).toFixed(1);
+  const hiCI = ((res.meanDiff + res.ci) * 1000).toFixed(1);
 
   console.log(
-    `[stat] ${name} A=${meanA.toFixed(3)}ms B=${meanB.toFixed(3)}ms ` +
-      `diff=${diff.toFixed(3)}ms (${rel.toFixed(2)}%) t=${report.t.toFixed(2)} ` +
-      `p=${report.pValue.toFixed(4)} ${sig}`
+    `  ${name.padEnd(PAD)}` +
+    `  A ${(mA * 1000).toFixed(0).padStart(6)}μs` +
+    `  B ${(mB * 1000).toFixed(0).padStart(6)}μs` +
+    `  ${pct > 0 ? '+' : ''}${pct.toFixed(1).padStart(5)}%` +
+    `  p=${pStr.padEnd(7)} ${sig}` +
+    `  CI:[${loCI},${hiCI}]μs`
   );
-}
-
-function collectSamples(fn: () => void, warmup: number, samples: number): Samples {
-  for (let i = 0; i < warmup; i++) fn();
-
-  const data: number[] = [];
-  for (let i = 0; i < samples; i++) {
-    const start = performance.now();
-    fn();
-    const end = performance.now();
-    data.push(end - start);
-  }
-  return data;
-}
-
-function mean(values: Samples): number {
-  if (values.length === 0) return 0;
-  let total = 0;
-  for (const v of values) total += v;
-  return total / values.length;
-}
-
-function variance(values: Samples, m: number): number {
-  if (values.length < 2) return 0;
-  let total = 0;
-  for (const v of values) {
-    const d = v - m;
-    total += d * d;
-  }
-  return total / (values.length - 1);
-}
-
-function welchTTest(a: Samples, b: Samples): { t: number; df: number; pValue: number } {
-  const meanA = mean(a);
-  const meanB = mean(b);
-  const varA = variance(a, meanA);
-  const varB = variance(b, meanB);
-
-  const nA = a.length;
-  const nB = b.length;
-  const se = Math.sqrt(varA / nA + varB / nB);
-
-  if (!Number.isFinite(se) || se === 0) {
-    return { t: 0, df: Math.max(0, nA + nB - 2), pValue: 1 };
-  }
-
-  const t = (meanA - meanB) / se;
-  const df =
-    Math.pow(varA / nA + varB / nB, 2) /
-    (Math.pow(varA / nA, 2) / (nA - 1) + Math.pow(varB / nB, 2) / (nB - 1));
-
-  // Normal approximation for p-value
-  const p = 2 * (1 - normalCdf(Math.abs(t)));
-
-  return { t, df, pValue: clamp(p, 0, 1) };
-}
-
-function normalCdf(x: number): number {
-  return 0.5 * (1 + erf(x / Math.SQRT2));
-}
-
-// Abramowitz and Stegun approximation
-function erf(x: number): number {
-  const sign = x < 0 ? -1 : 1;
-  const a1 = 0.254829592;
-  const a2 = -0.284496736;
-  const a3 = 1.421413741;
-  const a4 = -1.453152027;
-  const a5 = 1.061405429;
-  const p = 0.3275911;
-
-  const absX = Math.abs(x);
-  const t = 1 / (1 + p * absX);
-  const y =
-    1 -
-    (((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t) *
-      Math.exp(-absX * absX);
-  return sign * y;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
 }
