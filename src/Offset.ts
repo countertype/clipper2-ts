@@ -262,11 +262,11 @@ export class ClipperOffset {
   }
 
   private static translatePoint(pt: PointD, dx: number, dy: number): PointD {
-    return { x: pt.x + dx, y: pt.y + dy };
+    return { x: pt.x + dx, y: pt.y + dy, z: pt.z };
   }
 
   private static reflectPoint(pt: PointD, pivot: PointD): PointD {
-    return { x: pivot.x + (pivot.x - pt.x), y: pivot.y + (pivot.y - pt.y) };
+    return { x: pivot.x + (pivot.x - pt.x), y: pivot.y + (pivot.y - pt.y), z: pt.z };
   }
 
   private static almostZero(value: number, epsilon: number = 0.001): boolean {
@@ -314,37 +314,44 @@ export class ClipperOffset {
   private getPerpendic(pt: Point64, norm: PointD): Point64 {
     return {
       x: Math.round(pt.x + norm.x * this.groupDelta),
-      y: Math.round(pt.y + norm.y * this.groupDelta)
+      y: Math.round(pt.y + norm.y * this.groupDelta),
+      z: (pt.z || 0)
     };
   }
 
   private getPerpendicD(pt: Point64, norm: PointD): PointD {
     return {
       x: pt.x + norm.x * this.groupDelta,
-      y: pt.y + norm.y * this.groupDelta
+      y: pt.y + norm.y * this.groupDelta,
+      z: (pt.z || 0)
     };
   }
 
   private doBevel(path: Path64, j: number, k: number): void {
     let pt1: Point64, pt2: Point64;
+    const pjz = (path[j].z || 0);
     if (j === k) {
       const absDelta = Math.abs(this.groupDelta);
       pt1 = {
         x: Math.round(path[j].x - absDelta * this.normals[j].x),
-        y: Math.round(path[j].y - absDelta * this.normals[j].y)
+        y: Math.round(path[j].y - absDelta * this.normals[j].y),
+        z: pjz
       };
       pt2 = {
         x: Math.round(path[j].x + absDelta * this.normals[j].x),
-        y: Math.round(path[j].y + absDelta * this.normals[j].y)
+        y: Math.round(path[j].y + absDelta * this.normals[j].y),
+        z: pjz
       };
     } else {
       pt1 = {
         x: Math.round(path[j].x + this.groupDelta * this.normals[k].x),
-        y: Math.round(path[j].y + this.groupDelta * this.normals[k].y)
+        y: Math.round(path[j].y + this.groupDelta * this.normals[k].y),
+        z: pjz
       };
       pt2 = {
         x: Math.round(path[j].x + this.groupDelta * this.normals[j].x),
-        y: Math.round(path[j].y + this.groupDelta * this.normals[j].y)
+        y: Math.round(path[j].y + this.groupDelta * this.normals[j].y),
+        z: pjz
       };
     }
     this.pathOut.push(pt1);
@@ -365,7 +372,7 @@ export class ClipperOffset {
     const absDelta = Math.abs(this.groupDelta);
 
     // now offset the original vertex delta units along unit vector
-    let ptQ: PointD = { x: path[j].x, y: path[j].y };
+    let ptQ: PointD = { x: path[j].x, y: path[j].y, z: (path[j].z || 0) };
     ptQ = ClipperOffset.translatePoint(ptQ, absDelta * vec.x, absDelta * vec.y);
 
     // get perpendicular vertices
@@ -380,12 +387,14 @@ export class ClipperOffset {
         y: pt3.y + vec.y * this.groupDelta
       };
       const pt = ClipperOffset.intersectPoint(pt1, pt2, pt3, pt4);
+      pt.z = ptQ.z;
       //get the second intersect point through reflecion
       this.pathOut.push(Point64Utils.fromPointD(ClipperOffset.reflectPoint(pt, ptQ)));
       this.pathOut.push(Point64Utils.fromPointD(pt));
     } else {
       const pt4 = this.getPerpendicD(path[j], this.normals[k]);
       const pt = ClipperOffset.intersectPoint(pt1, pt2, pt3, pt4);
+      pt.z = ptQ.z;
       this.pathOut.push(Point64Utils.fromPointD(pt));
       //get the second intersect point through reflecion
       this.pathOut.push(Point64Utils.fromPointD(ClipperOffset.reflectPoint(pt, ptQ)));
@@ -396,7 +405,8 @@ export class ClipperOffset {
     const q = this.groupDelta / (cosA + 1);
     this.pathOut.push({
       x: Math.round(path[j].x + (this.normals[k].x + this.normals[j].x) * q),
-      y: Math.round(path[j].y + (this.normals[k].y + this.normals[j].y) * q)
+      y: Math.round(path[j].y + (this.normals[k].y + this.normals[j].y) * q),
+      z: (path[j].z || 0)
     });
   }
 
@@ -414,12 +424,14 @@ export class ClipperOffset {
     }
 
     const pt = path[j];
+    const ptz = (pt.z || 0);
     let offsetVec: PointD = { x: this.normals[k].x * this.groupDelta, y: this.normals[k].y * this.groupDelta };
     if (j === k) PointDUtils.negate(offsetVec);
     
     this.pathOut.push({
       x: Math.round(pt.x + offsetVec.x),
-      y: Math.round(pt.y + offsetVec.y)
+      y: Math.round(pt.y + offsetVec.y),
+      z: ptz
     });
     
     const steps = Math.ceil(this.stepsPerRad * Math.abs(angle));
@@ -430,7 +442,8 @@ export class ClipperOffset {
       };
       this.pathOut.push({
         x: Math.round(pt.x + offsetVec.x),
-        y: Math.round(pt.y + offsetVec.y)
+        y: Math.round(pt.y + offsetVec.y),
+        z: ptz
       });
     }
     this.pathOut.push(this.getPerpendic(path[j], this.normals[j]));
@@ -629,17 +642,19 @@ export class ClipperOffset {
         }
 
         // single vertex so build a circle or square ...
+        const ptz = (pt.z || 0);
         if (group.endType === EndType.Round) {
           const steps = Math.ceil(this.stepsPerRad * 2 * Math.PI);
           this.pathOut = ClipperOffset.ellipse(pt, Math.abs(this.groupDelta), Math.abs(this.groupDelta), steps);
+          if (ptz !== 0) for (let i = 0; i < this.pathOut.length; i++) this.pathOut[i].z = ptz;
         } else {
           const d = Math.ceil(Math.abs(this.groupDelta));
           const r = { left: pt.x - d, top: pt.y - d, right: pt.x + d, bottom: pt.y + d };
           this.pathOut = [
-            { x: r.left, y: r.top },
-            { x: r.right, y: r.top },
-            { x: r.right, y: r.bottom },
-            { x: r.left, y: r.bottom }
+            { x: r.left, y: r.top, z: ptz },
+            { x: r.right, y: r.top, z: ptz },
+            { x: r.right, y: r.bottom, z: ptz },
+            { x: r.left, y: r.bottom, z: ptz }
           ];
         }
         // pathOut is freshly allocated per call, so push directly (no spread clone needed)
