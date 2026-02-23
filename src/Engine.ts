@@ -1,6 +1,6 @@
 /*******************************************************************************
 * Author    :  Angus Johnson                                                   *
-* Date      :  11 October 2025                                                 *
+* Date      :  21 February 2026                                                *
 * Website   :  https://www.angusj.com                                          *
 * Copyright :  Angus Johnson 2010-2025                                         *
 * Purpose   :  This is the main polygon clipping module                        *
@@ -2312,7 +2312,7 @@ protected newOutRec(): OutRec {
 
 
   private intersectEdges(ae1: Active, ae2: Active, pt: Point64): void {
-    let resultOp: OutPt | null = null;
+    let resultOp: OutPt | null;
     // MANAGE OPEN PATH INTERSECTIONS SEPARATELY ...
     if (this.hasOpenPaths && (ClipperBase.isOpen(ae1) || ClipperBase.isOpen(ae2))) {
       if (ClipperBase.isOpen(ae1) && ClipperBase.isOpen(ae2)) return;

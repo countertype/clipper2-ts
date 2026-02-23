@@ -588,7 +588,7 @@ export class RectClip64 {
         prev = loc;
         for (const loc2 of startLocs) {
           if (prev === loc2) continue;
-          prev = this.addCornerWithDirection(prev, RectClip64.headingClockwise(prev, loc2));
+          this.addCornerWithDirection(prev, RectClip64.headingClockwise(prev, loc2));
           prev = loc2;
         }
         loc = prev;
@@ -952,7 +952,6 @@ export class RectClipLines64 extends RectClip64 {
       }
 
       const ip = intersectionResult.point;
-      crossingLoc = intersectionResult.newLocation;
 
       ////////////////////////////////////////////////////
       // we must be crossing the rect boundary to get here
@@ -961,7 +960,7 @@ export class RectClipLines64 extends RectClip64 {
       if (loc === Location.inside) { // path must be entering rect
         this.add(ip, true);
       } else if (prev !== Location.inside) {
-        // passing right through rect. 'ip' here will be the second 
+        // passing right through rect. 'ip' here will be the second
         // intersect pt but we'll also need the first intersect pt (ip2)
         crossingLoc = prev;
         const intersection2Result = RectClip64.getIntersection(this.rectPath, prevPt, path[i], crossingLoc);

@@ -2,6 +2,17 @@
 
 All changes to this project will be documented in this file
 
+## [2.0.1-13]
+
+### Fixed
+
+- `Engine`: fixed sliver triangle union bug ([#21](https://github.com/countertype/clipper2-ts/issues/21), upstream [#1067](https://github.com/AngusJohnson/Clipper2/issues/1067)) — `cleanCollinear` now always calls `fixSelfIntersects`, and removed faulty micro self-intersection shortcut
+- `Engine`/`RectClip`: fixed dead assignments flagged by `no-useless-assignment`
+
+### Changed
+
+- Upgraded eslint to v10, typescript-eslint to 8.56.1-alpha.3 (resolves minimatch ReDoS advisory)
+
 ## [2.0.1-12]
 
 ### Changed

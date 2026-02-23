@@ -1,6 +1,6 @@
 {
   "name": "clipper2-ts",
-  "version": "2.0.1-12",
+  "version": "2.0.1-13",
   "description": "TypeScript port of Clipper2 polygon clipping, boolean operations, offsetting, and triangulation library",
   "type": "module",
   "main": "dist/index.js",
@@ -59,16 +59,14 @@
     "node": ">=14.0.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.2",
+    "@eslint/js": "^10.0.1",
     "@types/node": "^24.10.1",
-    "@typescript-eslint/eslint-plugin": "^8.54.0",
-    "@typescript-eslint/parser": "^8.54.0",
     "@vitest/ui": "^4.0.10",
-    "eslint": "^9.39.2",
+    "eslint": "^10.0.1",
     "gh-pages": "^6.3.0",
     "rolldown": "^1.0.0-rc.3",
     "typescript": "^5.0.0",
-    "typescript-eslint": "^8.54.0",
+    "typescript-eslint": "8.56.1-alpha.3",
     "vitest": "^4.0.10"
   },
   "files": [
