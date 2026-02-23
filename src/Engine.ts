@@ -2938,7 +2938,6 @@ protected buildTree(polytree: PolyPathBase, solutionOpen: Paths64): void {
 
     let startOp = outrec.pts!;
     let op2: OutPt | null = startOp;
-    let removedAny = false;
     
     while (true) {
       // NB if preserveCollinear == true, then only remove 180 deg. spikes
@@ -2952,7 +2951,6 @@ protected buildTree(polytree: PolyPathBase, solutionOpen: Paths64): void {
           outrec.pts = op2.prev;
         }
         op2 = this.disposeOutPt(op2!);
-        removedAny = true;
         if (!this.isValidClosedPath(op2)) {
           outrec.pts = null;
           return;
@@ -2965,7 +2963,7 @@ protected buildTree(polytree: PolyPathBase, solutionOpen: Paths64): void {
       if (op2 === startOp) break;
     }
     
-    if (removedAny) this.fixSelfIntersects(outrec);
+    this.fixSelfIntersects(outrec);
   }
 
   private isValidClosedPath(op: OutPt | null): boolean {
@@ -2988,28 +2986,16 @@ protected buildTree(polytree: PolyPathBase, solutionOpen: Paths64): void {
     
     while (true) {
       if (op2.next && op2.next.next && 
-          // optimization (not in C# reference): bbox check before segsIntersect  
-          this.boundingBoxesOverlap(op2.prev.pt, op2.pt, op2.next.pt, op2.next.next.pt) && // TEST: Bbox only
+          this.boundingBoxesOverlap(op2.prev.pt, op2.pt, op2.next.pt, op2.next.next.pt) &&
           InternalClipper.segsIntersect(op2.prev.pt, op2.pt, op2.next.pt, op2.next.next.pt)) {
-        if (op2.next.next.next && 
-            // optimization (not in C# reference): bbox check before segsIntersect
-            this.boundingBoxesOverlap(op2.prev.pt, op2.pt, op2.next.next.pt, op2.next.next.next.pt) && // TEST: Bbox only
-            InternalClipper.segsIntersect(op2.prev.pt, op2.pt, op2.next.next.pt, op2.next.next.next.pt)) {
-          // adjacent intersections (ie a micro self-intersection)
-          op2 = this.duplicateOp(op2, false);
-          op2.pt = op2.next!.next!.next!.pt;
-          op2 = op2.next!;
-        } else {
           if (op2 === outrec.pts || op2.next === outrec.pts) {
             outrec.pts = outrec.pts!.prev;
           }
           this.doSplitOp(outrec, op2);
           if (outrec.pts === null) return;
           op2 = outrec.pts;
-          // triangles can't self-intersect
           if (op2.prev === op2.next!.next) break;
           continue;
-        }
       }
 
       op2 = op2.next!;
