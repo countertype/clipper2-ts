@@ -61,6 +61,7 @@ const ic32 = new Float64Array(32);
 const ic32b = new Float64Array(32);
 const ic48 = new Float64Array(48);
 const ic64 = new Float64Array(64);
+const icv = new Float64Array(4);
 let icfin = new Float64Array(1152);
 let icfin2 = new Float64Array(1152);
 
@@ -465,7 +466,6 @@ function incircleadapt(
   }
 
   // Cross-tail terms
-  const icv = new Float64Array(4);
   let bctlen: number, catlen: number, abtlen: number;
   let bcttlen: number, cattlen: number, abttlen: number;
 
@@ -765,6 +765,8 @@ export class Delaunay {
   private firstActive: Edge | null = null;
   private lowermostVertex: Vertex2 | null = null;
   private fastMath: boolean = false;
+  private readonly _edgesA: (Edge | null)[] = [null, null, null];
+  private readonly _edgesB: (Edge | null)[] = [null, null, null];
 
   constructor(delaunay: boolean = true) {
     this.useDelaunay = delaunay;
@@ -818,9 +820,8 @@ export class Delaunay {
     let iPrev: number;
     let iNext: number;
 
-    const foundIdx = Delaunay.findLocMinIdx(path, len, i0);
-    if (!foundIdx.found) return;
-    i0 = foundIdx.idx;
+    i0 = Delaunay.findLocMinIdx(path, len, i0);
+    if (i0 < 0) return;
 
     iPrev = Delaunay.prev(i0, len);
     while (path[iPrev].x === path[i0].x && path[iPrev].y === path[i0].y)
@@ -830,9 +831,8 @@ export class Delaunay {
 
     let i = i0;
     while (this.crossProductSign(path[iPrev], path[i], path[iNext]) === 0) {
-      const result = Delaunay.findLocMinIdx(path, len, i);
-      if (!result.found) return; // entirely collinear path
-      i = result.idx;
+      i = Delaunay.findLocMinIdx(path, len, i);
+      if (i < 0) return;
       iPrev = Delaunay.prev(i, len);
       while (path[iPrev].x === path[i].x && path[iPrev].y === path[i].y)
         iPrev = Delaunay.prev(iPrev, len);
@@ -1116,8 +1116,10 @@ export class Delaunay {
     let vertA: Vertex2 | null = null;
     let vertB: Vertex2 | null = null;
 
-    const edgesA: (Edge | null)[] = [null, null, null];
-    const edgesB: (Edge | null)[] = [null, null, null];
+    const edgesA = this._edgesA;
+    const edgesB = this._edgesB;
+    edgesA[0] = edgesA[1] = edgesA[2] = null;
+    edgesB[0] = edgesB[1] = edgesB[2] = null;
 
     for (let i = 0; i < 3; ++i) {
       if (edge.triA!.edges[i] === edge) continue;
@@ -1254,7 +1256,7 @@ export class Delaunay {
   }
 
 
-  private doTriangulateLeft(edge: Edge, pivot: Vertex2, minY: number): void {
+  private doTriangulateLeft(edge: Edge, pivot: Vertex2, minY: number, limitFan = false): void {
     let vAlt: Vertex2 | null = null;
     let eAlt: Edge | null = null;
 
@@ -1278,6 +1280,13 @@ export class Delaunay {
 
     if (vAlt === null || vAlt.pt.y < minY || eAlt === null) return;
 
+    // Domiter & Zalik 2008, §3.2: stop fan extension when angle at pivot > pi/2
+    if (limitFan) {
+      const dvx = v.pt.x - pivot.pt.x, dvy = v.pt.y - pivot.pt.y;
+      const dax = vAlt.pt.x - pivot.pt.x, day = vAlt.pt.y - pivot.pt.y;
+      if (dvx * dax + dvy * day < 0) return;
+    }
+
     if (vAlt.pt.y < pivot.pt.y) {
       if (Delaunay.isLeftEdge(eAlt)) return;
     } else if (vAlt.pt.y > pivot.pt.y) {
@@ -1292,10 +1301,10 @@ export class Delaunay {
     this.createTriangle(edge, eAlt, eX);
 
     if (!Delaunay.edgeCompleted(eX))
-      this.doTriangulateLeft(eX, vAlt, minY);
+      this.doTriangulateLeft(eX, vAlt, minY, true);
   }
 
-  private doTriangulateRight(edge: Edge, pivot: Vertex2, minY: number): void {
+  private doTriangulateRight(edge: Edge, pivot: Vertex2, minY: number, limitFan = false): void {
     let vAlt: Vertex2 | null = null;
     let eAlt: Edge | null = null;
 
@@ -1319,6 +1328,13 @@ export class Delaunay {
 
     if (vAlt === null || vAlt.pt.y < minY || eAlt === null) return;
 
+    // Domiter & Zalik 2008, §3.2: stop fan extension when angle at pivot > pi/2
+    if (limitFan) {
+      const dvx = v.pt.x - pivot.pt.x, dvy = v.pt.y - pivot.pt.y;
+      const dax = vAlt.pt.x - pivot.pt.x, day = vAlt.pt.y - pivot.pt.y;
+      if (dvx * dax + dvy * day < 0) return;
+    }
+
     if (vAlt.pt.y < pivot.pt.y) {
       if (Delaunay.isRightEdge(eAlt)) return;
     } else if (vAlt.pt.y > pivot.pt.y) {
@@ -1333,7 +1349,7 @@ export class Delaunay {
     this.createTriangle(edge, eX, eAlt);
 
     if (!Delaunay.edgeCompleted(eX))
-      this.doTriangulateRight(eX, vAlt, minY);
+      this.doTriangulateRight(eX, vAlt, minY, true);
   }
 
   private addEdgeToActives(edge: Edge): void {
@@ -1684,15 +1700,15 @@ export class Delaunay {
     vert.edges.pop();
   }
 
-  private static findLocMinIdx(path: Path64, len: number, idx: number): { found: boolean, idx: number } {
-    if (len < 3) return { found: false, idx };
+  private static findLocMinIdx(path: Path64, len: number, idx: number): number {
+    if (len < 3) return -1;
     const i0 = idx;
     let n = (idx + 1) % len;
 
     while (path[n].y <= path[idx].y) {
       idx = n;
       n = (n + 1) % len;
-      if (idx === i0) return { found: false, idx };
+      if (idx === i0) return -1;
     }
 
     while (path[n].y >= path[idx].y) {
@@ -1700,7 +1716,7 @@ export class Delaunay {
       n = (n + 1) % len;
     }
 
-    return { found: true, idx };
+    return idx;
   }
 
   private static prev(idx: number, len: number): number {
@@ -1741,13 +1757,6 @@ export class Delaunay {
 
   private static readonly maxSafeDelta = Math.floor(Math.sqrt(Number.MAX_SAFE_INTEGER / 2));
 
-  private static areSafeDeltas(...vals: number[]): boolean {
-    for (const v of vals) {
-      if (Math.abs(v) > Delaunay.maxSafeDelta) return false;
-    }
-    return true;
-  }
-
   private static inCircleTest(ptA: Point64, ptB: Point64, ptC: Point64, ptD: Point64): number {
     return adaptiveIncircleSign(ptA.x, ptA.y, ptB.x, ptB.y, ptC.x, ptC.y, ptD.x, ptD.y);
   }
@@ -1758,7 +1767,8 @@ export class Delaunay {
     const ax = pt.x - segPt1.x;
     const ay = pt.y - segPt1.y;
 
-    if (Delaunay.areSafeDeltas(dx, dy, ax, ay)) {
+    const msd = Delaunay.maxSafeDelta;
+    if (Math.abs(dx) <= msd && Math.abs(dy) <= msd && Math.abs(ax) <= msd && Math.abs(ay) <= msd) {
       const qNum = ax * dx + ay * dy;
       const denom = dx * dx + dy * dy;
       if (qNum < 0) return Delaunay.distanceSqr(pt, segPt1);
@@ -1808,7 +1818,8 @@ export class Delaunay {
     const dx = a.x - b.x;
     const dy = a.y - b.y;
 
-    if (Delaunay.areSafeDeltas(dx, dy)) {
+    const msd = Delaunay.maxSafeDelta;
+    if (Math.abs(dx) <= msd && Math.abs(dy) <= msd) {
       const dist = dx * dx + dy * dy;
       if (dist <= Number.MAX_SAFE_INTEGER) return dist;
     }
