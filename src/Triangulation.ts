@@ -673,8 +673,6 @@ function incircleadapt(
   return icfin[finlen - 1];
 }
 
-// BigInt constant for remaining static BigInt methods (segsIntersect, shortestDistFromSegment, distanceSqr)
-const B0 = BigInt(0);
 
 // incircle sign, with adaptive exact fallback
 function adaptiveIncircleSign(
@@ -1741,13 +1739,6 @@ export class Delaunay {
     return res;
   }
 
-  private static areSafePoints(...pts: Point64[]): boolean {
-    for (const pt of pts) {
-      if (!Number.isSafeInteger(pt.x) || !Number.isSafeInteger(pt.y)) return false;
-    }
-    return true;
-  }
-
   private static readonly maxSafeDelta = Math.floor(Math.sqrt(Number.MAX_SAFE_INTEGER / 2));
 
   private static areSafeDeltas(...vals: number[]): boolean {
@@ -1766,126 +1757,47 @@ export class Delaunay {
     const dy = segPt2.y - segPt1.y;
     const ax = pt.x - segPt1.x;
     const ay = pt.y - segPt1.y;
-    const qNum = ax * dx + ay * dy;
-    const denom = dx * dx + dy * dy;
 
     if (Delaunay.areSafeDeltas(dx, dy, ax, ay)) {
+      const qNum = ax * dx + ay * dy;
+      const denom = dx * dx + dy * dy;
       if (qNum < 0) return Delaunay.distanceSqr(pt, segPt1);
       if (qNum > denom) return Delaunay.distanceSqr(pt, segPt2);
       return (ax * dy - dx * ay) * (ax * dy - dx * ay) / denom;
     }
 
-    if (Delaunay.areSafePoints(pt, segPt1, segPt2)) {
-      const dx = BigInt(segPt2.x) - BigInt(segPt1.x);
-      const dy = BigInt(segPt2.y) - BigInt(segPt1.y);
-      const ax = BigInt(pt.x) - BigInt(segPt1.x);
-      const ay = BigInt(pt.y) - BigInt(segPt1.y);
-      const qNum = ax * dx + ay * dy;
-      const denom = dx * dx + dy * dy;
+    const dxB = BigInt(segPt2.x) - BigInt(segPt1.x);
+    const dyB = BigInt(segPt2.y) - BigInt(segPt1.y);
+    const axB = BigInt(pt.x) - BigInt(segPt1.x);
+    const ayB = BigInt(pt.y) - BigInt(segPt1.y);
+    const qNum = axB * dxB + ayB * dyB;
+    const denom = dxB * dxB + dyB * dyB;
+    const B0 = BigInt(0);
 
-      if (qNum < B0) return Delaunay.distanceSqr(pt, segPt1);
-      if (qNum > denom) return Delaunay.distanceSqr(pt, segPt2);
-
-      const cross = ax * dy - dx * ay;
-      return Number(cross * cross) / Number(denom);
-    }
-
-    if (qNum < 0) return Delaunay.distanceSqr(pt, segPt1);
+    if (qNum < B0) return Delaunay.distanceSqr(pt, segPt1);
     if (qNum > denom) return Delaunay.distanceSqr(pt, segPt2);
 
-    return (ax * dy - dx * ay) * (ax * dy - dx * ay) / denom;
+    const cross = axB * dyB - dxB * ayB;
+    return Number(cross * cross) / Number(denom);
   }
 
   private static segsIntersect(s1a: Point64, s1b: Point64, s2a: Point64, s2b: Point64): IntersectKind {
-    // ignore segments sharing an end-point
     if ((s1a.x === s2a.x && s1a.y === s2a.y) ||
         (s1a.x === s2b.x && s1a.y === s2b.y) ||
         (s1b.x === s2b.x && s1b.y === s2b.y)) return IntersectKind.none;
 
-    const dy1 = s1b.y - s1a.y;
-    const dx1 = s1b.x - s1a.x;
-    const dy2 = s2b.y - s2a.y;
-    const dx2 = s2b.x - s2a.x;
-    const dxs = s1a.x - s2a.x;
-    const dys = s1a.y - s2a.y;
+    const d1 = adaptiveOrient2dSign(s2a.x, s2a.y, s2b.x, s2b.y, s1a.x, s1a.y);
+    const d2 = adaptiveOrient2dSign(s2a.x, s2a.y, s2b.x, s2b.y, s1b.x, s1b.y);
 
-    if (Delaunay.areSafeDeltas(dy1, dx1, dy2, dx2, dxs, dys)) {
-      const cp = dy1 * dx2 - dy2 * dx1;
-      if (cp === 0) return IntersectKind.collinear;
+    if (d1 === 0 && d2 === 0) return IntersectKind.collinear;
+    if (d1 === 0 || d2 === 0 || d1 === d2) return IntersectKind.none;
 
-      let t = dxs * dy2 - dys * dx2;
+    const d3 = adaptiveOrient2dSign(s1a.x, s1a.y, s1b.x, s1b.y, s2a.x, s2a.y);
+    const d4 = adaptiveOrient2dSign(s1a.x, s1a.y, s1b.x, s1b.y, s2b.x, s2b.y);
 
-      // nb: testing for t === 0 is unreliable due to float imprecision
-      if (t >= 0) {
-        if (cp < 0 || t >= cp) return IntersectKind.none;
-      } else {
-        if (cp > 0 || t <= cp) return IntersectKind.none;
-      }
+    if (d3 === 0 || d4 === 0 || d3 === d4) return IntersectKind.none;
 
-      t = dxs * dy1 - dys * dx1;
-
-      if (t >= 0) {
-        if (cp > 0 && t < cp) return IntersectKind.intersect;
-      } else {
-        if (cp < 0 && t > cp) return IntersectKind.intersect;
-      }
-
-      return IntersectKind.none;
-    }
-
-    if (Delaunay.areSafePoints(s1a, s1b, s2a, s2b)) {
-      const dy1 = BigInt(s1b.y) - BigInt(s1a.y);
-      const dx1 = BigInt(s1b.x) - BigInt(s1a.x);
-      const dy2 = BigInt(s2b.y) - BigInt(s2a.y);
-      const dx2 = BigInt(s2b.x) - BigInt(s2a.x);
-
-      const cp = dy1 * dx2 - dy2 * dx1;
-      if (cp === B0) return IntersectKind.collinear;
-
-      let t = (BigInt(s1a.x) - BigInt(s2a.x)) * dy2 -
-        (BigInt(s1a.y) - BigInt(s2a.y)) * dx2;
-
-      if (t === B0) return IntersectKind.none;
-      if (t > B0) {
-        if (cp < B0 || t >= cp) return IntersectKind.none;
-      } else {
-        if (cp > B0 || t <= cp) return IntersectKind.none;
-      }
-
-      t = (BigInt(s1a.x) - BigInt(s2a.x)) * dy1 -
-        (BigInt(s1a.y) - BigInt(s2a.y)) * dx1;
-
-      if (t === B0) return IntersectKind.none;
-      if (t > B0) {
-        if (cp > B0 && t < cp) return IntersectKind.intersect;
-      } else {
-        if (cp < B0 && t > cp) return IntersectKind.intersect;
-      }
-
-      return IntersectKind.none;
-    }
-
-    const cp = dy1 * dx2 - dy2 * dx1;
-    if (cp === 0) return IntersectKind.collinear;
-
-    let t = dxs * dy2 - dys * dx2;
-
-    // nb: testing for t === 0 is unreliable due to float imprecision
-    if (t >= 0) {
-      if (cp < 0 || t >= cp) return IntersectKind.none;
-    } else {
-      if (cp > 0 || t <= cp) return IntersectKind.none;
-    }
-
-    t = dxs * dy1 - dys * dx1;
-
-    if (t >= 0) {
-      if (cp > 0 && t < cp) return IntersectKind.intersect;
-    } else {
-      if (cp < 0 && t > cp) return IntersectKind.intersect;
-    }
-
-    return IntersectKind.none;
+    return IntersectKind.intersect;
   }
 
   private static distSqr(pt1: Point64, pt2: Point64): number {
@@ -1901,12 +1813,8 @@ export class Delaunay {
       if (dist <= Number.MAX_SAFE_INTEGER) return dist;
     }
 
-    if (Delaunay.areSafePoints(a, b)) {
-      const dxBig = BigInt(a.x) - BigInt(b.x);
-      const dyBig = BigInt(a.y) - BigInt(b.y);
-      return Number(dxBig * dxBig + dyBig * dyBig);
-    }
-
-    return dx * dx + dy * dy;
+    const dxB = BigInt(a.x) - BigInt(b.x);
+    const dyB = BigInt(a.y) - BigInt(b.y);
+    return Number(dxB * dxB + dyB * dyB);
   }
 }
