@@ -1108,6 +1108,7 @@ export class Delaunay {
           this.removeEdgeFromActives(e);
       }
     }
+
     return tri;
   }
 
