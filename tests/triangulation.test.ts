@@ -899,66 +899,64 @@ describe('Issue #1062 - Overlapping triangles', () => {
   
   function checkForOverlappingTriangles(triangles: Path64[]): { hasOverlap: boolean, details: string[] } {
     const details: string[] = [];
-    
+
     // Build a map of edges to the triangles that use them
-    const edgeToTriangles = new Map<string, { triIdx: number, thirdVertex: Point64 }[]>();
-    
+    const edgeToTriangles = new Map<string, { triIdx: number, thirdVertex: Point64, edgeA: Point64, edgeB: Point64 }[]>();
+
     for (let i = 0; i < triangles.length; i++) {
       const tri = triangles[i];
       if (tri.length !== 3) continue;
-      
+
       // For each edge of the triangle, record which triangle uses it and what the opposite vertex is
       for (let j = 0; j < 3; j++) {
         const p1 = tri[j];
         const p2 = tri[(j + 1) % 3];
         const opposite = tri[(j + 2) % 3];
-        
+
         // Create canonical edge key (smaller point first)
         const aFirst = p1.x < p2.x || (p1.x === p2.x && p1.y <= p2.y);
         const a = aFirst ? p1 : p2;
         const b = aFirst ? p2 : p1;
-        const key = `${a.x},${a.y}-${b.x},${b.y}`;
-        
+        // Use | separator to avoid conflicts with negative sign
+        const key = `${a.x},${a.y}|${b.x},${b.y}`;
+
         let entry = edgeToTriangles.get(key);
         if (!entry) {
           entry = [];
           edgeToTriangles.set(key, entry);
         }
-        entry.push({ triIdx: i, thirdVertex: opposite });
+        entry.push({ triIdx: i, thirdVertex: opposite, edgeA: a, edgeB: b });
       }
     }
-    
+
     // Check for edges shared by two triangles where both third vertices are on the same side
     let hasOverlap = false;
-    for (const [edgeKey, tris] of edgeToTriangles) {
+    for (const [, tris] of edgeToTriangles) {
       if (tris.length !== 2) continue;
-      
+
       const [t1, t2] = tris;
-      
-      // Parse edge endpoints from key
-      const parts = edgeKey.split('-');
-      const [ax, ay] = parts[0].split(',').map(Number);
-      const [bx, by] = parts[1].split(',').map(Number);
-      
+      const { edgeA, edgeB } = t1;
+
       // Compute cross product sign for both third vertices relative to the edge
-      const cross1 = (bx - ax) * (t1.thirdVertex.y - ay) - (by - ay) * (t1.thirdVertex.x - ax);
-      const cross2 = (bx - ax) * (t2.thirdVertex.y - ay) - (by - ay) * (t2.thirdVertex.x - ax);
-      
+      const cross1 = (edgeB.x - edgeA.x) * (t1.thirdVertex.y - edgeA.y) - (edgeB.y - edgeA.y) * (t1.thirdVertex.x - edgeA.x);
+      const cross2 = (edgeB.x - edgeA.x) * (t2.thirdVertex.y - edgeA.y) - (edgeB.y - edgeA.y) * (t2.thirdVertex.x - edgeA.x);
+
       const sign1 = cross1 > 0 ? 1 : cross1 < 0 ? -1 : 0;
       const sign2 = cross2 > 0 ? 1 : cross2 < 0 ? -1 : 0;
-      
+
       // If both triangles' opposite vertices are on the same side, that's an overlap
       if (sign1 !== 0 && sign2 !== 0 && sign1 === sign2) {
         hasOverlap = true;
         details.push(
-          `Triangles ${t1.triIdx} and ${t2.triIdx} share edge (${ax},${ay})-(${bx},${by}) ` +
+          `Triangles ${t1.triIdx} and ${t2.triIdx} share edge ` +
+          `(${edgeA.x},${edgeA.y})-(${edgeB.x},${edgeB.y}) ` +
           `but both opposite vertices are on the same side: ` +
           `tri ${t1.triIdx} opposite=(${t1.thirdVertex.x},${t1.thirdVertex.y}), ` +
           `tri ${t2.triIdx} opposite=(${t2.thirdVertex.x},${t2.thirdVertex.y})`
         );
       }
     }
-    
+
     return { hasOverlap, details };
   }
 
@@ -1218,6 +1216,183 @@ describe('Issue #1062 - Overlapping triangles', () => {
     }
     
     expect(hasOverlap).toBe(false);
+  });
+});
+
+describe('Issue #1069 - Triangulation of 15-point concave polygon', () => {
+  // https://github.com/AngusJohnson/Clipper2/issues/1069
+  // A 15-vertex polygon produces overlapping triangles in upstream C++ implementation.
+  // The Delaunay result has triangles where two triangles sharing an edge have their
+  // opposite vertices on the same side, causing overlap.
+
+  const polygon: PathsD = [
+    [
+      { x: 0.41606003046035767, y: -0.62075996398925781 },
+      { x: 0.33283001184463501, y: -0.42865997552871704 },
+      { x: 0.40702998638153076, y: -0.39651000499725342 },
+      { x: 0.32753002643585205, y: -0.21299999952316284 },
+      { x: 0.25332999229431152, y: -0.24514001607894897 },
+      { x: 0.13756000995635986, y: 0.022080004215240479 },
+      { x: 0.23574000597000122, y: 0.064620018005371094 },
+      { x: 0.21813999116420746, y: 0.10526635497808456 },
+      { x: 0.045466706156730652, y: -0.056208707392215729 },
+      { x: 0.11392998695373535, y: -0.026520013809204102 },
+      { x: 0.1934400200843811, y: -0.21003001928329468 },
+      { x: 0.0099200010299682617, y: -0.28953999280929565 },
+      { x: -0.05176563560962677, y: -0.14713546633720398 },
+      { x: -0.074258878827095032, y: -0.16817000508308411 },
+      { x: 0.16830998659133911, y: -0.7281000018119812 },
+    ],
+  ];
+
+  function checkForOverlappingTrianglesD(
+    triangles: PathsD,
+  ): { hasOverlap: boolean; details: string[] } {
+    const details: string[] = [];
+    const edgeToTriangles = new Map<
+      string,
+      {
+        triIdx: number;
+        thirdVertex: { x: number; y: number };
+        edgeA: { x: number; y: number };
+        edgeB: { x: number; y: number };
+      }[]
+    >();
+
+    for (let i = 0; i < triangles.length; i++) {
+      const tri = triangles[i];
+      if (tri.length !== 3) continue;
+
+      for (let j = 0; j < 3; j++) {
+        const p1 = tri[j];
+        const p2 = tri[(j + 1) % 3];
+        const opposite = tri[(j + 2) % 3];
+
+        const aFirst = p1.x < p2.x || (p1.x === p2.x && p1.y <= p2.y);
+        const a = aFirst ? p1 : p2;
+        const b = aFirst ? p2 : p1;
+        // Use | separator to avoid conflicts with negative sign
+        const key = `${a.x},${a.y}|${b.x},${b.y}`;
+
+        let entry = edgeToTriangles.get(key);
+        if (!entry) {
+          entry = [];
+          edgeToTriangles.set(key, entry);
+        }
+        entry.push({ triIdx: i, thirdVertex: opposite, edgeA: a, edgeB: b });
+      }
+    }
+
+    let hasOverlap = false;
+    for (const [, tris] of edgeToTriangles) {
+      if (tris.length !== 2) continue;
+
+      const [t1, t2] = tris;
+      const { edgeA, edgeB } = t1;
+
+      const cross1 =
+        (edgeB.x - edgeA.x) * (t1.thirdVertex.y - edgeA.y) -
+        (edgeB.y - edgeA.y) * (t1.thirdVertex.x - edgeA.x);
+      const cross2 =
+        (edgeB.x - edgeA.x) * (t2.thirdVertex.y - edgeA.y) -
+        (edgeB.y - edgeA.y) * (t2.thirdVertex.x - edgeA.x);
+
+      const sign1 = cross1 > 0 ? 1 : cross1 < 0 ? -1 : 0;
+      const sign2 = cross2 > 0 ? 1 : cross2 < 0 ? -1 : 0;
+
+      if (sign1 !== 0 && sign2 !== 0 && sign1 === sign2) {
+        hasOverlap = true;
+        details.push(
+          `Triangles ${t1.triIdx} and ${t2.triIdx} share edge ` +
+            `(${edgeA.x},${edgeA.y})-(${edgeB.x},${edgeB.y}) ` +
+            `but both opposite vertices are on the same side: ` +
+            `tri ${t1.triIdx} opposite=(${t1.thirdVertex.x},${t1.thirdVertex.y}), ` +
+            `tri ${t2.triIdx} opposite=(${t2.thirdVertex.x},${t2.thirdVertex.y})`,
+        );
+      }
+    }
+
+    return { hasOverlap, details };
+  }
+
+  it('should produce correct number of triangles (Delaunay)', () => {
+    const { result, solution } = Clipper.triangulateD(polygon, 7, true);
+
+    expect(result).toBe(TriangulateResult.success);
+    // 15 vertices → 13 triangles for a simple polygon
+    expect(solution).toHaveLength(13);
+    for (const tri of solution) {
+      expect(tri).toHaveLength(3);
+    }
+  });
+
+  it('should produce correct number of triangles (non-Delaunay)', () => {
+    const { result, solution } = Clipper.triangulateD(polygon, 7, false);
+
+    expect(result).toBe(TriangulateResult.success);
+    expect(solution).toHaveLength(13);
+    for (const tri of solution) {
+      expect(tri).toHaveLength(3);
+    }
+  });
+
+  it('should not produce overlapping triangles (Delaunay)', () => {
+    const { result, solution } = Clipper.triangulateD(polygon, 7, true);
+    expect(result).toBe(TriangulateResult.success);
+
+    const { hasOverlap, details } = checkForOverlappingTrianglesD(solution);
+    if (hasOverlap) {
+      console.log('Overlapping triangles detected (Delaunay):');
+      for (const detail of details) {
+        console.log('  ', detail);
+      }
+    }
+    expect(hasOverlap).toBe(false);
+  });
+
+  it('should not produce overlapping triangles (non-Delaunay)', () => {
+    const { result, solution } = Clipper.triangulateD(polygon, 7, false);
+    expect(result).toBe(TriangulateResult.success);
+
+    const { hasOverlap, details } = checkForOverlappingTrianglesD(solution);
+    if (hasOverlap) {
+      console.log('Overlapping triangles detected (non-Delaunay):');
+      for (const detail of details) {
+        console.log('  ', detail);
+      }
+    }
+    expect(hasOverlap).toBe(false);
+  });
+
+  it('should preserve total area after triangulation', () => {
+    const { result, solution } = Clipper.triangulateD(polygon, 7, true);
+    expect(result).toBe(TriangulateResult.success);
+
+    const originalArea = Math.abs(Clipper.areaD(polygon[0]));
+    let totalTriangleArea = 0;
+    for (const tri of solution) {
+      totalTriangleArea += Math.abs(Clipper.areaD(tri));
+    }
+
+    // Area should be preserved within floating-point tolerance
+    expect(Math.abs(totalTriangleArea - originalArea)).toBeLessThan(
+      originalArea * 1e-6,
+    );
+  });
+
+  it('should use all 15 vertices in the triangulation', () => {
+    const { result, solution } = Clipper.triangulateD(polygon, 7, true);
+    expect(result).toBe(TriangulateResult.success);
+
+    // Collect all unique vertices used in the triangulation
+    const usedVertices = new Set<string>();
+    for (const tri of solution) {
+      for (const pt of tri) {
+        usedVertices.add(`${pt.x},${pt.y}`);
+      }
+    }
+
+    expect(usedVertices.size).toBe(15);
   });
 });
 

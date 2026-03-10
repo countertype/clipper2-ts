@@ -67,6 +67,27 @@ export function generateGrid(
   return paths;
 }
 
+export function generatePolygonWithHoles(
+  outerRadius: number,
+  outerVerts: number,
+  holeCount: number,
+  holeRadius: number,
+  holeVerts: number,
+): { outer: Path64, holes: Path64[] } {
+  const outer = generateCircle(outerRadius, 0, 0, outerVerts);
+  const holes: Path64[] = [];
+  const ringRadius = outerRadius * 0.6;
+  for (let i = 0; i < holeCount; i++) {
+    const angle = (2 * Math.PI * i) / holeCount;
+    const cx = Math.round(ringRadius * Math.cos(angle));
+    const cy = Math.round(ringRadius * Math.sin(angle));
+    const hole = generateCircle(holeRadius, cx, cy, holeVerts);
+    hole.reverse();
+    holes.push(hole);
+  }
+  return { outer, holes };
+}
+
 export const testData = {
   smallCircle: generateCircle(50, 100, 100, 20),
   smallRect: generateRectangle(0, 0, 100, 100),
