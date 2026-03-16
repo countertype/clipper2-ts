@@ -160,20 +160,19 @@ export class Delaunay {
     i = iNext;
 
     for (; ;) {
-      // vPrev is a locMin here
-      this.locMinStack.push(vPrev);
-      // ? update lowermostVertex ...
-      if (this.lowermostVertex === null ||
-        vPrev.pt.y > this.lowermostVertex.pt.y ||
-        (vPrev.pt.y === this.lowermostVertex.pt.y &&
-          vPrev.pt.x < this.lowermostVertex.pt.x))
-        this.lowermostVertex = vPrev;
-
       iNext = Delaunay.next(i, len);
       if (this.crossProductSign(vPrev.pt, path[i], path[iNext]) === 0) {
         i = iNext;
         continue;
       }
+
+      // vPrev is a locMin here
+      this.locMinStack.push(vPrev);
+      if (this.lowermostVertex === null ||
+        vPrev.pt.y > this.lowermostVertex.pt.y ||
+        (vPrev.pt.y === this.lowermostVertex.pt.y &&
+          vPrev.pt.x < this.lowermostVertex.pt.x))
+        this.lowermostVertex = vPrev;
 
       // ascend up next bound to LocMax
       while (path[i].y <= vPrev.pt.y) {
