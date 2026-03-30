@@ -3326,7 +3326,8 @@ export class ClipperD extends ClipperBase {
   }
 
   public addPath(path: PathD, polytype: PathType, isOpen: boolean = false): void {
-    super.addPath(Clipper.scalePath64(path, this.scale), polytype, isOpen);
+    const tmp: PathsD = [path];
+    this.addPaths(tmp, polytype, isOpen);
   }
 
   public addPaths(paths: PathsD, polytype: PathType, isOpen: boolean = false): void {
