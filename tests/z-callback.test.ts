@@ -292,9 +292,57 @@ describe('Offset Z propagation', () => {
   });
 });
 
+describe('Z Callback in doSplitOp (issue #31)', () => {
+  it('should invoke zCallback when fixing self-intersections in output', () => {
+    const callbackPoints: Point64[] = [];
 
+    const c64 = new Clipper64();
+    c64.zCallback = (_bot1, _top1, _bot2, _top2, intersectPt) => {
+      intersectPt.z = 99;
+      callbackPoints.push({ ...intersectPt });
+    };
 
+    // A bowtie subject triggers fixSelfIntersects -> doSplitOp.
+    // The self-crossing at the pinch point goes through doSplitOp's
+    // getLineIntersectPt, which should now invoke zCallback.
+    const subject: Paths64 = [
+      Clipper.makePath([0, 0, 100, 100, 100, 0, 0, 100])
+    ];
 
+    c64.addSubject(subject);
+    const solution: Paths64 = [];
+    c64.execute(ClipType.Union, FillRule.NonZero, solution);
+
+    expect(solution.length).toBeGreaterThan(0);
+
+    // The callback should have been invoked for the split intersection
+    const splitCallbacks = callbackPoints.filter(p => p.z === 99);
+    expect(splitCallbacks.length).toBeGreaterThan(0);
+  });
+
+  it('should invoke zCallback in doSplitOp for ClipperD', () => {
+    const callbackPoints: PointD[] = [];
+
+    const cD = new ClipperD();
+    cD.zCallback = (_bot1, _top1, _bot2, _top2, intersectPt) => {
+      intersectPt.z = 77;
+      callbackPoints.push({ ...intersectPt });
+    };
+
+    const subject: PathsD = [
+      Clipper.makePathD([0, 0, 100, 100, 100, 0, 0, 100])
+    ];
+
+    cD.addSubjectPaths(subject);
+    const solution: PathsD = [];
+    cD.execute(ClipType.Union, FillRule.NonZero, solution);
+
+    expect(solution.length).toBeGreaterThan(0);
+
+    const splitCallbacks = callbackPoints.filter(p => p.z === 77);
+    expect(splitCallbacks.length).toBeGreaterThan(0);
+  });
+});
 
 
 
