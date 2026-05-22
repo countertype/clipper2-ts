@@ -3015,6 +3015,11 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
   const ip = InternalClipper.getLineIntersectPt(
     prevOp.pt, splitOp.pt, splitOp.next!.pt, nextNextOp.pt)!;
 
+  if (this.zCallbackInternal) {
+    (this.zCallbackInternal as ZCallback64)(
+      prevOp.pt, splitOp.pt, splitOp.next!.pt, nextNextOp.pt, ip);
+  }
+
   const doubleArea1 = ClipperBase.areaOutPt(prevOp);
   const absDoubleArea1 = doubleArea1 < B0 ? -doubleArea1 : doubleArea1;
   

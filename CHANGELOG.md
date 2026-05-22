@@ -2,6 +2,16 @@
 
 All changes to this project will be documented in this file
 
+## [2.0.1-16]
+
+### Fixed
+
+- `Engine`: invoke `zCallback` in `doSplitOp` after `getLineIntersectPt` ([#31](https://github.com/countertype/clipper2-ts/issues/31))
+
+### Changed
+
+- Bumped `brace-expansion`, `postcss`, and `vite` versions
+
 ## [2.0.1-15]
 
 ### Fixed
