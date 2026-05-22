@@ -684,16 +684,12 @@ private static topX(ae: Active, currentY: number): number {
     return ae.windDx > 0 ? ae.vertexTop!.prev!.prev! : ae.vertexTop!.next!.next!;
   }
 
-  private static isMaxima(vertex: Vertex): boolean;
-  private static isMaxima(ae: Active): boolean;
-  private static isMaxima(vertexOrAe: Vertex | Active): boolean {
-    if ('flags' in vertexOrAe) {
-      // It's a Vertex
-      return (vertexOrAe.flags & VertexFlags.LocalMax) !== VertexFlags.None;
-    } else {
-      // It's an Active
-      return ClipperBase.isMaxima(vertexOrAe.vertexTop!);
-    }
+  private static isMaximaVertex(v: Vertex): boolean {
+    return (v.flags & VertexFlags.LocalMax) !== VertexFlags.None;
+  }
+
+  private static isMaximaEdge(ae: Active): boolean {
+    return (ae.vertexTop!.flags & VertexFlags.LocalMax) !== VertexFlags.None;
   }
 
   private static getMaximaPair(ae: Active): Active | null {
@@ -1395,7 +1391,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       // NB 'ae' will never be horizontal here
       if (ae.top.y === y) {
         ae.curX = ae.top.x;
-        if (ClipperBase.isMaxima(ae)) {
+        if (ClipperBase.isMaximaEdge(ae)) {
           ae = this.doMaxima(ae); // TOP OF BOUND (MAXIMA)
           continue;
         } else {
@@ -1800,7 +1796,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       horzEdge.vertexTop = ClipperBase.nextVertex(horzEdge);
       horzEdge.top = pt;
       wasTrimmed = true;
-      if (ClipperBase.isMaxima(horzEdge)) break;
+      if (ClipperBase.isMaximaVertex(horzEdge.vertexTop!)) break;
       pt = ClipperBase.nextVertex(horzEdge).pt;
     }
     if (wasTrimmed) ClipperBase.setDx(horzEdge); // +/-infinity
@@ -1873,7 +1869,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
         ((result!.flags & (VertexFlags.OpenEnd | VertexFlags.LocalMax)) === VertexFlags.None))
         result = result!.prev;
     }
-    if (!ClipperBase.isMaxima(result!)) result = null; // not a maxima
+    if (!ClipperBase.isMaximaVertex(result!)) result = null; // not a maxima
     return result;
   }
 
@@ -1884,7 +1880,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     } else {
       while (result!.prev!.pt.y === result!.pt.y) result = result!.prev;
     }
-    if (!ClipperBase.isMaxima(result!)) result = null; // not a maxima
+    if (!ClipperBase.isMaximaVertex(result!)) result = null; // not a maxima
     return result;
   }
 
@@ -2542,12 +2538,12 @@ protected newOutRec(): OutRec {
 
     // for starting open paths, place them according to
     // the direction they're about to turn
-    if (!ClipperBase.isMaxima(resident) && (resident.top.y > newcomer.top.y)) {
+    if (!ClipperBase.isMaximaEdge(resident) && (resident.top.y > newcomer.top.y)) {
       return InternalClipper.crossProductSign(newcomer.bot,
         resident.top, ClipperBase.nextVertex(resident).pt) <= 0;
     }
 
-    if (!ClipperBase.isMaxima(newcomer) && (newcomer.top.y > resident.top.y)) {
+    if (!ClipperBase.isMaximaEdge(newcomer) && (newcomer.top.y > resident.top.y)) {
       return InternalClipper.crossProductSign(newcomer.bot,
         newcomer.top, ClipperBase.nextVertex(newcomer).pt) >= 0;
     }

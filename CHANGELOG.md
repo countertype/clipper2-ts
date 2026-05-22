@@ -2,6 +2,12 @@
 
 All changes to this project will be documented in this file
 
+## [2.0.1-17]
+
+### Performance
+
+- `Engine`: split polymorphic `isMaxima` dispatch into monomorphic `isMaximaVertex`/`isMaximaEdge` — eliminates `'flags' in` runtime type check in hot sweep paths (`doTopOfScanbeam`, `trimHorz`, `isValidAelOrder`)
+
 ## [2.0.1-16]
 
 ### Fixed
