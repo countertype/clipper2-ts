@@ -195,6 +195,21 @@ export class HorzJoin {
   }
 }
 
+function compareHorzSegments(hs1: HorzSegment, hs2: HorzSegment): number {
+  if (hs1.rightOp === null) {
+    return hs2.rightOp === null ? 0 : 1;
+  }
+  if (hs2.rightOp === null) return -1;
+  return hs1.leftOp!.pt.x - hs2.leftOp!.pt.x;
+}
+
+function compareIntersectNodes(a: IntersectNode, b: IntersectNode): number {
+  if (a.pt.y !== b.pt.y) return (a.pt.y > b.pt.y) ? -1 : 1;
+  if (a.pt.x !== b.pt.x) return (a.pt.x < b.pt.x) ? -1 : 1;
+  if (a.edge1.curX !== b.edge1.curX) return (a.edge1.curX < b.edge1.curX) ? -1 : 1;
+  return (a.edge2.curX < b.edge2.curX) ? -1 : (a.edge2.curX > b.edge2.curX) ? 1 : 0;
+}
+
 ///////////////////////////////////////////////////////////////////
 // Important: UP and DOWN here are premised on Y-axis positive down
 // displays, which is the orientation used in Clipper's development.
@@ -660,10 +675,6 @@ private static topX(ae: Active, currentY: number): number {
     return ae.dx === Number.POSITIVE_INFINITY;
   }
 
-  private static swapActives(ae1: Active, ae2: Active): [Active, Active] {
-    return [ae2, ae1];
-  }
-
   private static getPolyType(ae: Active): PathType {
     return ae.localMin!.polytype;
   }
@@ -955,11 +966,21 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       // Now if the LeftB isn't on the left of RightB then we need swap them.
       if (leftBound !== null && rightBound !== null) {
         if (ClipperBase.isHorizontal(leftBound)) {
-          if (ClipperBase.isHeadingRightHorz(leftBound)) [leftBound, rightBound] = ClipperBase.swapActives(leftBound, rightBound);
+          if (ClipperBase.isHeadingRightHorz(leftBound)) {
+            const tmp = leftBound;
+            leftBound = rightBound;
+            rightBound = tmp;
+          }
         } else if (ClipperBase.isHorizontal(rightBound)) {
-          if (ClipperBase.isHeadingLeftHorz(rightBound)) [leftBound, rightBound] = ClipperBase.swapActives(leftBound, rightBound);
+          if (ClipperBase.isHeadingLeftHorz(rightBound)) {
+            const tmp = leftBound;
+            leftBound = rightBound;
+            rightBound = tmp;
+          }
         } else if (leftBound.dx < rightBound.dx) {
-          [leftBound, rightBound] = ClipperBase.swapActives(leftBound, rightBound);
+          const tmp = leftBound;
+          leftBound = rightBound;
+          rightBound = tmp;
         }
       } else if (leftBound === null) {
         leftBound = rightBound;
@@ -1262,7 +1283,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     }
     if (k < 2) return;
     
-    this.horzSegList.sort((a, b) => this.horzSegSort(a, b));
+    this.horzSegList.sort(compareHorzSegments);
 
     for (let i = 0; i < k - 1; i++) {
       const hs1 = this.horzSegList[i];
@@ -1344,14 +1365,6 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       hs.leftToRight = false;
     }
     return true;
-  }
-
-  private horzSegSort(hs1: HorzSegment, hs2: HorzSegment): number {
-    if (hs1.rightOp === null) {
-      return hs2.rightOp === null ? 0 : 1;
-    }
-    if (hs2.rightOp === null) return -1;
-    return hs1.leftOp!.pt.x - hs2.leftOp!.pt.x;
   }
 
   protected duplicateOp(op: OutPt, insertAfter: boolean): OutPt {
@@ -1654,15 +1667,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     // crucial that intersections only occur between adjacent edges.
 
     // First we do a quicksort so intersections proceed in a bottom up order ...
-    this.intersectList.sort((a, b) => {
-      if (a.pt.y !== b.pt.y) return (a.pt.y > b.pt.y) ? -1 : 1;
-      if (a.pt.x !== b.pt.x) return (a.pt.x < b.pt.x) ? -1 : 1;
-      // Tiebreaker: when points are identical, sort by edge1's curX position
-      // This provides deterministic ordering matching C# IntroSort behavior
-      if (a.edge1.curX !== b.edge1.curX) return (a.edge1.curX < b.edge1.curX) ? -1 : 1;
-      // Final tiebreaker: edge2's curX
-      return (a.edge2.curX < b.edge2.curX) ? -1 : (a.edge2.curX > b.edge2.curX) ? 1 : 0;
-    });
+    this.intersectList.sort(compareIntersectNodes);
 
     // Now as we process these intersections, we must sometimes adjust the order
     // to ensure that intersecting edges are always adjacent ...
@@ -2313,7 +2318,11 @@ protected newOutRec(): OutRec {
     if (this.hasOpenPaths && (ClipperBase.isOpen(ae1) || ClipperBase.isOpen(ae2))) {
       if (ClipperBase.isOpen(ae1) && ClipperBase.isOpen(ae2)) return;
       // the following line avoids duplicating quite a bit of code
-      if (ClipperBase.isOpen(ae2)) [ae1, ae2] = ClipperBase.swapActives(ae1, ae2);
+      if (ClipperBase.isOpen(ae2)) {
+        const tmp = ae1;
+        ae1 = ae2;
+        ae2 = tmp;
+      }
       if (this.isJoined(ae2)) this.split(ae2, pt); // needed for safety
 
       if (this.cliptype === ClipType.Union) {
