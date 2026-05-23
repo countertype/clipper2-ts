@@ -7,6 +7,7 @@ All changes to this project will be documented in this file
 ### Performance
 
 - `Engine`: split polymorphic `isMaxima` dispatch into monomorphic `isMaximaVertex`/`isMaximaEdge` — eliminates `'flags' in` runtime type check in hot sweep paths (`doTopOfScanbeam`, `trimHorz`, `isValidAelOrder`)
+- `Engine`: reduced small allocations in sweep hot paths around intersection sorting and active-edge swaps
 
 ## [2.0.1-16]
 
