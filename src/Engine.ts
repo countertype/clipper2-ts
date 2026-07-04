@@ -267,17 +267,21 @@ export const ClipperEngine = {
       let v0: Vertex | null = null;
       let prevV: Vertex | null = null;
       
+      // nb: vertexList holds only each path's head vertex; the rest of the
+      // chain stays reachable through the next/prev links
+      let prevPt: Point64 | null = null;
       for (let j = 0, len2 = path.length; j < len2; j++) {
         const pt = path[j];
         if (v0 === null) {
           v0 = new Vertex(pt, VertexFlags.None, null);
           vertexList.push(v0);
           prevV = v0;
-        } else if (!(prevV!.pt.x === pt.x && prevV!.pt.y === pt.y)) { // ie skips duplicates
+          prevPt = pt;
+        } else if (!(prevPt!.x === pt.x && prevPt!.y === pt.y)) { // ie skips duplicates
           const currV: Vertex = new Vertex(pt, VertexFlags.None, prevV);
-          vertexList.push(currV);
           prevV!.next = currV;
           prevV = currV;
+          prevPt = pt;
         }
       }
       
@@ -540,6 +544,10 @@ export class ClipperBase {
   protected readonly horzJoinList: HorzJoin[] = [];
   protected currentLocMin: number = 0;
   protected currentBotY: number = 0;
+  // True when every active edge's curX already equals topX(edge, topY) for the
+  // scanbeam top being processed (set by buildIntersectList when the SEL scan
+  // finds no inversions, i.e. no intersections; consumed by doTopOfScanbeam).
+  private curXValidAtTop: boolean = false;
   protected isSortedMinimaList: boolean = false;
   protected hasOpenPaths: boolean = false;
   protected usingPolytree: boolean = false;
@@ -664,7 +672,9 @@ private static topX(ae: Active, currentY: number): number {
 }
 
   private static isHorizontal(ae: Active): boolean {
-    return ae.top.y === ae.bot.y;
+    // dx is ±Infinity iff top.y === bot.y (see getDx); every mutation of
+    // bot/top must be followed by setDx() for this to hold.
+    return ae.dx === Number.NEGATIVE_INFINITY || ae.dx === Number.POSITIVE_INFINITY;
   }
 
   private static isHeadingRightHorz(ae: Active): boolean {
@@ -715,17 +725,19 @@ private static topX(ae: Active, currentY: number): number {
   // optimization (not in C# reference): fast bounding box overlap check for segment intersection
   private boundingBoxesOverlap(p1: Point64, p2: Point64, p3: Point64, p4: Point64): boolean {
     // segment 1: p1-p2, segment 2: p3-p4
-    const min1x = Math.min(p1.x, p2.x);
-    const max1x = Math.max(p1.x, p2.x);
-    const min1y = Math.min(p1.y, p2.y);
-    const max1y = Math.max(p1.y, p2.y);
-    
-    const min2x = Math.min(p3.x, p4.x);
-    const max2x = Math.max(p3.x, p4.x);
-    const min2y = Math.min(p3.y, p4.y);
-    const max2y = Math.max(p3.y, p4.y);
-    
-    return !(max1x < min2x || max2x < min1x || max1y < min2y || max2y < min1y);
+    const min1x = p1.x < p2.x ? p1.x : p2.x;
+    const max2x = p3.x > p4.x ? p3.x : p4.x;
+    if (max2x < min1x) return false;
+    const max1x = p1.x > p2.x ? p1.x : p2.x;
+    const min2x = p3.x < p4.x ? p3.x : p4.x;
+    if (max1x < min2x) return false;
+
+    const min1y = p1.y < p2.y ? p1.y : p2.y;
+    const max2y = p3.y > p4.y ? p3.y : p4.y;
+    if (max2y < min1y) return false;
+    const max1y = p1.y > p2.y ? p1.y : p2.y;
+    const min2y = p3.y < p4.y ? p3.y : p4.y;
+    return max1y >= min2y;
   }
 
   protected clearSolutionOnly(): void {
@@ -768,6 +780,7 @@ private static topX(ae: Active, currentY: number): number {
     this.currentLocMin = 0;
     this.actives = null;
     this.sel = null;
+    this.curXValidAtTop = false;
     this.succeeded = true;
   }
 
@@ -1277,12 +1290,16 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
   }
 
   private convertHorzSegsToJoins(): void {
+    // compact valid segments to [0, k) so the sort below only orders those
+    const list = this.horzSegList;
     let k = 0;
-    for (const hs of this.horzSegList) {
-      if (this.updateHorzSegment(hs)) k++;
+    for (let i = 0, len = list.length; i < len; i++) {
+      const hs = list[i];
+      if (this.updateHorzSegment(hs)) list[k++] = hs;
     }
     if (k < 2) return;
-    
+    list.length = k;
+
     this.horzSegList.sort(compareHorzSegments);
 
     for (let i = 0; i < k - 1; i++) {
@@ -1398,6 +1415,11 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
   }
 
   private doTopOfScanbeam(y: number): void {
+    // When the preceding buildIntersectList found no inversions, every edge's
+    // curX already equals topX(ae, y), so skip recomputing it (topX is pure in
+    // ae.bot/ae.dx/y, none of which change below for edges not at their top).
+    const curXValid = this.curXValidAtTop;
+    this.curXValidAtTop = false;
     this.sel = null; // sel is reused to flag horizontals (see PushHorz below)
     let ae = this.actives;
     while (ae !== null) {
@@ -1415,7 +1437,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
             this.pushHorz(ae); // horizontals are processed later
           }
         }
-      } else { // i.e. not the top of the edge
+      } else if (!curXValid) { // i.e. not the top of the edge
         ae.curX = ClipperBase.topX(ae, y);  // TopX already returns correctly rounded integer
       }
 
@@ -1607,7 +1629,13 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
 
     // Calculate edge positions at the top of the current scanbeam, and from this
     // we will determine the intersections required to reach these new positions.
-    this.adjustCurrXAndCopyToSEL(topY);
+    // If the AEL is already sorted by the new curX values (no adjacent
+    // inversions), no edges intersect within this scanbeam, so skip the merge
+    // sort; every edge's curX is then already correct for topY.
+    if (!this.adjustCurrXAndCopyToSEL(topY)) {
+      this.curXValidAtTop = true;
+      return false;
+    }
 
     // Find all edge intersections in the current scanbeam using a stable merge
     // sort that ensures only adjacent edges are intersecting. Intersect info is
@@ -1694,19 +1722,27 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     return (inode.edge1.nextInAEL === inode.edge2) || (inode.edge1.prevInAEL === inode.edge2);
   }
 
-  private adjustCurrXAndCopyToSEL(topY: number): void {
+  // Returns true if any adjacent pair is inverted at topY (i.e. at least one
+  // intersection exists within this scanbeam).
+  private adjustCurrXAndCopyToSEL(topY: number): boolean {
     let ae = this.actives;
     this.sel = ae;
+    let prevX = Number.NEGATIVE_INFINITY;
+    let inverted = false;
     while (ae !== null) {
       ae.prevInSEL = ae.prevInAEL;
       ae.nextInSEL = ae.nextInAEL;
       ae.jump = ae.nextInSEL;
       // it is safe to ignore 'joined' edges here because
       // if necessary they will be split in IntersectEdges()
-      ae.curX = ClipperBase.topX(ae, topY);
+      const x = ClipperBase.topX(ae, topY);
+      ae.curX = x;
       // NB don't update ae.curr.Y yet (see AddNewIntersectNode)
+      if (x < prevX) inverted = true;
+      prevX = x;
       ae = ae.nextInAEL;
     }
+    return inverted;
   }
 
   private doMaxima(ae: Active): Active | null {
@@ -2235,8 +2271,9 @@ protected newOutRec(): OutRec {
 
   private checkJoinLeft(ae: Active, pt: Point64, checkCurrX: boolean = false): void {
     const prev = ae.prevInAEL;
-    if (prev === null || 
-      !ClipperBase.isHotEdge(ae) || !ClipperBase.isHotEdge(prev) || 
+    if (prev === null) return;
+    if (!checkCurrX && ae.curX !== prev.curX) return;
+    if (!ClipperBase.isHotEdge(ae) || !ClipperBase.isHotEdge(prev) ||
       ClipperBase.isHorizontal(ae) || ClipperBase.isHorizontal(prev) ||
       ClipperBase.isOpen(ae) || ClipperBase.isOpen(prev)) return;
     if ((pt.y < ae.top.y + 2 || pt.y < prev.top.y + 2) &&  // avoid trivial joins
@@ -2244,7 +2281,7 @@ protected newOutRec(): OutRec {
 
     if (checkCurrX) {
       if (this.perpendicDistFromLineSqrdGreaterThanQuarter(pt, prev.bot, prev.top)) return;
-    } else if (ae.curX !== prev.curX) return;
+    }
     if (!InternalClipper.isCollinear(ae.top, pt, prev.top)) return;
 
     if (ae.outrec!.idx === prev.outrec!.idx) {
@@ -2260,16 +2297,17 @@ protected newOutRec(): OutRec {
 
   private checkJoinRight(ae: Active, pt: Point64, checkCurrX: boolean = false): void {
     const next = ae.nextInAEL;
-    if (next === null || 
-      !ClipperBase.isHotEdge(ae) || !ClipperBase.isHotEdge(next) || 
+    if (next === null) return;
+    if (!checkCurrX && ae.curX !== next.curX) return;
+    if (!ClipperBase.isHotEdge(ae) || !ClipperBase.isHotEdge(next) ||
       ClipperBase.isHorizontal(ae) || ClipperBase.isHorizontal(next) ||
-      ClipperBase.isOpen(ae) || ClipperBase.isOpen(next)) return; 
+      ClipperBase.isOpen(ae) || ClipperBase.isOpen(next)) return;
     if ((pt.y < ae.top.y + 2 || pt.y < next.top.y + 2) &&  // avoid trivial joins
       ((ae.bot.y > pt.y) || (next.bot.y > pt.y)))  return; // (#490)
 
     if (checkCurrX) {
       if (this.perpendicDistFromLineSqrdGreaterThanQuarter(pt, next.bot, next.top)) return;
-    } else if (ae.curX !== next.curX) return;
+    }
     if (!InternalClipper.isCollinear(ae.top, pt, next.top)) return;
 
     if (ae.outrec!.idx === next.outrec!.idx) {

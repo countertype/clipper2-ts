@@ -2,6 +2,13 @@
 
 All changes to this project will be documented in this file
 
+## [2.0.1-18]
+
+### Performance
+
+- `Engine`: skip the intersection merge sort on scanbeams where the active edge list is already sorted (no intersections possible), and reuse the edge positions computed during that scan in `doTopOfScanbeam`
+- `Engine`: cheaper hot-path predicates (`isHorizontal` via `dx`, reordered `checkJoinLeft`/`checkJoinRight` early-outs, early-exit bounding-box overlap test), head-only vertex list, and horizontal-segment compaction before sorting — benchmark suite ~11% faster overall, intersection/difference/xor operations up to 45% faster
+
 ## [2.0.1-17]
 
 ### Performance
