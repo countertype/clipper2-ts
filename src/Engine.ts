@@ -3087,9 +3087,14 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
     prevOp.next = newOp2;
   }
 
+  // A smaller loop of opposite orientation is usually a spurious twist and is
+  // dropped. But when it lies inside the remainder it is a hole the remainder
+  // already covers (the loop's -1 cancels the remainder's +1): dropping it
+  // fills that hole. Keep such a loop as its own (hole) path.
   if (!(absDoubleArea2 > B2) || // area > 1
       (!(absDoubleArea2 > absDoubleArea1) &&
-        ((doubleArea2 > B0) !== (doubleArea1 > B0)))) return;
+        ((doubleArea2 > B0) !== (doubleArea1 > B0)) &&
+        !ClipperBase.triangleInsideOutPt(prevOp, ip, splitOp.pt, splitOp.next!.pt))) return;
         
   const newOutRec = this.newOutRec();
   newOutRec.owner = outrec.owner;
@@ -3112,6 +3117,27 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
       if (outrec.splits === null) outrec.splits = [];
       outrec.splits.push(newOutRec.idx);
     }
+  }
+
+  // Non-zero winding of the triangle's centroid against the closed path at op,
+  // in doubles so the centroid is not rounded off a thin triangle.
+  private static triangleInsideOutPt(op: OutPt, a: Point64, b: Point64, c: Point64): boolean {
+    const x = (a.x + b.x + c.x) / 3;
+    const y = (a.y + b.y + c.y) / 3;
+    let winding = 0;
+    let op2 = op;
+    do {
+      const p = op2.pt;
+      const q = op2.next!.pt;
+      const cross = (q.x - p.x) * (y - p.y) - (x - p.x) * (q.y - p.y);
+      if (p.y <= y) {
+        if (q.y > y && cross > 0) winding++;
+      } else if (q.y <= y && cross < 0) {
+        winding--;
+      }
+      op2 = op2.next!;
+    } while (op2 !== op);
+    return winding !== 0;
   }
 
   private static areaOutPt(op: OutPt): bigint {
