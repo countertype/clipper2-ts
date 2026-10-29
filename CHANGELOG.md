@@ -2,6 +2,12 @@
 
 All changes to this project will be documented in this file
 
+## [Unreleased]
+
+### Fixed
+
+- Package loading: expose the existing ES module build through `module-sync` so Node.js with synchronous `require(esm)` support can load `require('clipper2-ts')`, including TypeScript CLI tools compiled to CommonJS
+
 ## [2.0.1-18]
 
 ### Performance
