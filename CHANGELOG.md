@@ -2,6 +2,17 @@
 
 All changes to this project will be documented in this file
 
+## [Unreleased]
+
+### Fixed
+
+- `Engine`: `union` no longer runs out of memory when consecutive horizontal edges reverse direction; the sweep direction is now re-read for each horizontal, as in C++ ([#36](https://github.com/countertype/clipper2-ts/pull/36))
+- `Engine`: `doSplitOp` keeps a reversed split loop that lies inside the remaining path instead of discarding it, so `union` no longer fills a hole created by intersection rounding ([#35](https://github.com/countertype/clipper2-ts/pull/35), upstream [#1109](https://github.com/AngusJohnson/Clipper2/pull/1109)). The kept hole is owned by the remaining path, so `PolyTree` output nests it correctly
+
+### Performance
+
+- `Engine`: `resetHorzDirection` writes the horizontal's X bounds to fields instead of allocating a result object per call
+
 ## [2.0.1-18]
 
 ### Performance
