@@ -1077,7 +1077,8 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       this.getCurrYMaximaVertexOpen(horz) :
       this.getCurrYMaximaVertex(horz);
 
-    const { isLeftToRight, leftX, rightX } = this.resetHorzDirection(horz, vertexMax);
+    const { isLeftToRight: initialDirection, leftX, rightX } = this.resetHorzDirection(horz, vertexMax);
+    let isLeftToRight = initialDirection;
     let leftX2 = leftX;
     let rightX2 = rightX;
 
@@ -1183,6 +1184,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       this.updateEdgeIntoAEL(horz);
 
       const resetResult = this.resetHorzDirection(horz, vertexMax);
+      isLeftToRight = resetResult.isLeftToRight;
       leftX2 = resetResult.leftX;
       rightX2 = resetResult.rightX;
     }
@@ -1200,7 +1202,8 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     const y = horz.bot.y;
     const vertexMax = this.getCurrYMaximaVertex(horz);
 
-    const { isLeftToRight, leftX, rightX } = this.resetHorzDirection(horz, vertexMax);
+    const { isLeftToRight: initialDirection, leftX, rightX } = this.resetHorzDirection(horz, vertexMax);
+    let isLeftToRight = initialDirection;
     let leftX2 = leftX;
     let rightX2 = rightX;
 
@@ -1277,6 +1280,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       this.updateEdgeIntoAEL(horz);
 
       const resetResult = this.resetHorzDirection(horz, vertexMax);
+      isLeftToRight = resetResult.isLeftToRight;
       leftX2 = resetResult.leftX;
       rightX2 = resetResult.rightX;
     }
