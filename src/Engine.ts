@@ -3095,13 +3095,16 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
   // dropped. But when it lies inside the remainder it is a hole the remainder
   // already covers (the loop's -1 cancels the remainder's +1): dropping it
   // fills that hole. Keep such a loop as its own (hole) path.
-  if (!(absDoubleArea2 > B2) || // area > 1
-      (!(absDoubleArea2 > absDoubleArea1) &&
-        ((doubleArea2 > B0) !== (doubleArea1 > B0)) &&
-        !ClipperBase.triangleInsideOutPt(prevOp, ip, splitOp.pt, splitOp.next!.pt))) return;
-        
+  if (!(absDoubleArea2 > B2)) return; // area > 1
+  const isHoleOfRemainder = !(absDoubleArea2 > absDoubleArea1) &&
+    ((doubleArea2 > B0) !== (doubleArea1 > B0));
+  if (isHoleOfRemainder &&
+      !ClipperBase.triangleInsidePath(prevOp, ip, splitOp.pt, splitOp.next!.pt)) return;
+
   const newOutRec = this.newOutRec();
-  newOutRec.owner = outrec.owner;
+  // A kept hole is owned by the remainder, so a PolyTree nests it under
+  // that path instead of listing it as a top-level outer (TS fix-up to #1109).
+  newOutRec.owner = isHoleOfRemainder ? outrec : outrec.owner;
   splitOp.outrec = newOutRec;
   splitOp.next!.outrec = newOutRec;
 
@@ -3123,9 +3126,10 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
     }
   }
 
-  // Non-zero winding of the triangle's centroid against the closed path at op,
-  // in doubles so the centroid is not rounded off a thin triangle.
-  private static triangleInsideOutPt(op: OutPt, a: Point64, b: Point64, c: Point64): boolean {
+  // returns true when the triangle's centroid has a non-zero winding number
+  // relative to the closed path at op (the centroid is kept in doubles so that
+  // it isn't rounded outside a very thin triangle)
+  private static triangleInsidePath(op: OutPt, a: Point64, b: Point64, c: Point64): boolean {
     const x = (a.x + b.x + c.x) / 3;
     const y = (a.y + b.y + c.y) / 3;
     let winding = 0;
