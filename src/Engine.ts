@@ -529,6 +529,10 @@ export class ClipperBase {
   protected fillrule: FillRule = FillRule.EvenOdd;
   protected actives: Active | null = null;
   protected sel: Active | null = null;
+  // X bounds of the horizontal being processed, written by resetHorzDirection
+  // (C# passes these as 'out' parameters)
+  private horzLeft = 0;
+  private horzRight = 0;
   protected readonly minimaList: LocalMinima[] = [];
   protected readonly intersectList: IntersectNode[] = [];
   protected readonly vertexList: Vertex[] = [];
@@ -1077,10 +1081,9 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       this.getCurrYMaximaVertexOpen(horz) :
       this.getCurrYMaximaVertex(horz);
 
-    const { isLeftToRight: initialDirection, leftX, rightX } = this.resetHorzDirection(horz, vertexMax);
-    let isLeftToRight = initialDirection;
-    let leftX2 = leftX;
-    let rightX2 = rightX;
+    let isLeftToRight = this.resetHorzDirection(horz, vertexMax);
+    let leftX2 = this.horzLeft;
+    let rightX2 = this.horzRight;
 
     if (ClipperBase.isHotEdge(horz)) {
       const op = this.addOutPt(horz, { x: horz.curX, y });
@@ -1183,10 +1186,9 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
 
       this.updateEdgeIntoAEL(horz);
 
-      const resetResult = this.resetHorzDirection(horz, vertexMax);
-      isLeftToRight = resetResult.isLeftToRight;
-      leftX2 = resetResult.leftX;
-      rightX2 = resetResult.rightX;
+      isLeftToRight = this.resetHorzDirection(horz, vertexMax);
+      leftX2 = this.horzLeft;
+      rightX2 = this.horzRight;
     }
 
     if (ClipperBase.isHotEdge(horz)) {
@@ -1202,10 +1204,9 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     const y = horz.bot.y;
     const vertexMax = this.getCurrYMaximaVertex(horz);
 
-    const { isLeftToRight: initialDirection, leftX, rightX } = this.resetHorzDirection(horz, vertexMax);
-    let isLeftToRight = initialDirection;
-    let leftX2 = leftX;
-    let rightX2 = rightX;
+    let isLeftToRight = this.resetHorzDirection(horz, vertexMax);
+    let leftX2 = this.horzLeft;
+    let rightX2 = this.horzRight;
 
     if (ClipperBase.isHotEdge(horz)) {
       const op = this.addOutPt(horz, { x: horz.curX, y });
@@ -1279,10 +1280,9 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
 
       this.updateEdgeIntoAEL(horz);
 
-      const resetResult = this.resetHorzDirection(horz, vertexMax);
-      isLeftToRight = resetResult.isLeftToRight;
-      leftX2 = resetResult.leftX;
-      rightX2 = resetResult.rightX;
+      isLeftToRight = this.resetHorzDirection(horz, vertexMax);
+      leftX2 = this.horzLeft;
+      rightX2 = this.horzRight;
     }
 
     if (ClipperBase.isHotEdge(horz)) {
@@ -1929,21 +1929,28 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     return result;
   }
 
-  private resetHorzDirection(horz: Active, vertexMax: Vertex | null): { isLeftToRight: boolean; leftX: number; rightX: number } {
+  // Returns the sweep direction and writes the horizontal's X bounds to
+  // horzLeft/horzRight (the C# 'out' parameters), avoiding a result object
+  // allocation per call.
+  private resetHorzDirection(horz: Active, vertexMax: Vertex | null): boolean {
     if (horz.bot.x === horz.top.x) {
       // the horizontal edge is going nowhere ...
-      const leftX = horz.curX;
-      const rightX = horz.curX;
+      this.horzLeft = horz.curX;
+      this.horzRight = horz.curX;
       let ae = horz.nextInAEL;
       while (ae !== null && ae.vertexTop !== vertexMax)
         ae = ae.nextInAEL;
-      return { isLeftToRight: ae !== null, leftX, rightX };
+      return ae !== null;
     }
 
     if (horz.curX < horz.top.x) {
-      return { isLeftToRight: true, leftX: horz.curX, rightX: horz.top.x };
+      this.horzLeft = horz.curX;
+      this.horzRight = horz.top.x;
+      return true;
     } else {
-      return { isLeftToRight: false, leftX: horz.top.x, rightX: horz.curX };
+      this.horzLeft = horz.top.x;
+      this.horzRight = horz.curX;
+      return false;
     }
   }
 
