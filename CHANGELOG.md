@@ -2,7 +2,7 @@
 
 All changes to this project will be documented in this file
 
-## [Unreleased]
+## [2.0.1-19]
 
 ### Fixed
 
@@ -10,6 +10,8 @@ All changes to this project will be documented in this file
 - `Engine`: `doSplitOp` keeps a reversed split loop that lies inside the remaining path instead of discarding it, so `union` no longer fills a hole created by intersection rounding ([#35](https://github.com/countertype/clipper2-ts/pull/35), upstream [#1109](https://github.com/AngusJohnson/Clipper2/pull/1109)). The kept hole is owned by the remaining path, so `PolyTree` output nests it correctly
 - `Engine`: `checkSplitOwner` guards against emptied OutRecs whose splits reference each other (PolyClipping/Clipper2 [f97d65db](https://github.com/PolyClipping/Clipper2/commit/f97d65db), upstream [#1084](https://github.com/AngusJohnson/Clipper2/issues/1084))
 - `Offset`: empty paths no longer throw, and a 2 point `Joined` path no longer changes the end type of the paths that follow it (PolyClipping/Clipper2 [#9](https://github.com/PolyClipping/Clipper2/issues/9))
+- `RectClip`: a path entering the rectangle through a vertex on its edge no longer drops the corner that follows; the location from the second intersection is now carried forward as in C# ([#37](https://github.com/countertype/clipper2-ts/issues/37))
+- `RectClip`: intersections with a rectangle side keep the coordinate on that side exact instead of landing one unit inside after rounding (upstream [#1114](https://github.com/AngusJohnson/Clipper2/pull/1114), [#1095](https://github.com/AngusJohnson/Clipper2/issues/1095))
 
 ### Performance
 
