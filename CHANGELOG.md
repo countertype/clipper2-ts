@@ -16,6 +16,7 @@ All changes to this project will be documented in this file
 ### Performance
 
 - `Engine`: `resetHorzDirection` writes the horizontal's X bounds to fields instead of allocating a result object per call
+- `Engine`: local minima are no longer queued as scanlines up front; `popScanline` merges the next minimum's y with the scanline list, and duplicate scanlines are popped together instead of being tracked in a `Set` (PolyClipping/Clipper2 [#2](https://github.com/PolyClipping/Clipper2/issues/2), upstream [#1115](https://github.com/AngusJohnson/Clipper2/pull/1115)). Offsets 5-9% faster, complex polygon unions 3-6% faster
 
 ## [2.0.1-18]
 

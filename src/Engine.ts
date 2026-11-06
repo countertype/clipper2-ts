@@ -40,6 +40,10 @@ push(value: number): void {
   this.siftUp(this.data.length - 1);
 }
 
+peek(): number | null {
+  return this.data.length === 0 ? null : this.data[0];
+}
+
 pop(): number | null {
   if (this.data.length === 0) return null;
   const max = this.data[0];
@@ -538,7 +542,6 @@ export class ClipperBase {
   protected readonly vertexList: Vertex[] = [];
   protected readonly outrecList: OutRec[] = [];
   protected readonly scanlineHeap = new ScanlineHeap();
-  protected readonly scanlineSet = new Set<number>();
   // For very small inputs, a heap + set can cost more than it saves.
   // Use an array-based scanline mode initially, and upgrade to heap+set
   // automatically if the scanline list grows beyond a threshold.
@@ -547,6 +550,11 @@ export class ClipperBase {
   protected readonly horzSegList: HorzSegment[] = [];
   protected readonly horzJoinList: HorzJoin[] = [];
   protected currentLocMin: number = 0;
+  // y of minimaList[currentLocMin], cached so popScanline doesn't chase
+  // minimaList -> vertex -> pt on every call. hasLocMin is false once all
+  // minima are consumed (an integer sentinel keeps the field a Smi for V8).
+  private nextLocMinY: number = 0;
+  private hasLocMin: boolean = false;
   protected currentBotY: number = 0;
   // True when every active edge's curX already equals topX(edge, topY) for the
   // scanbeam top being processed (set by buildIntersectList when the SEL scan
@@ -747,7 +755,6 @@ private static topX(ae: Active, currentY: number): number {
   protected clearSolutionOnly(): void {
     while (this.actives !== null) this.deleteFromAEL(this.actives);
     this.scanlineHeap.clear();
-    this.scanlineSet.clear();
     this.scanlineArr.length = 0;
     this.disposeIntersectNodes();
     this.outrecList.length = 0;
@@ -771,17 +778,17 @@ private static topX(ae: Active, currentY: number): number {
     }
 
     this.scanlineHeap.clear();
-    this.scanlineSet.clear();
     this.scanlineArr.length = 0;
     // Heuristic: local minima count correlates with number of scanlines and
     // scanline insert/pop activity. For glyph-like inputs, this is typically small.
     this.useScanlineArray = this.minimaList.length <= 16;
-    for (let i = this.minimaList.length - 1; i >= 0; i--) {
-      this.insertScanline(this.minimaList[i].vertex.pt.y);
-    }
+    // the local minima aren't added to the scanline list since they're already
+    // sorted, instead popScanline() merges them with the scanline list
 
     this.currentBotY = 0;
     this.currentLocMin = 0;
+    this.hasLocMin = this.minimaList.length > 0;
+    this.nextLocMinY = this.hasLocMin ? this.minimaList[0].vertex.pt.y : 0;
     this.actives = null;
     this.sel = null;
     this.curXValidAtTop = false;
@@ -789,12 +796,10 @@ private static topX(ae: Active, currentY: number): number {
   }
 
   private upgradeScanlineStructureFromArray(): void {
-    // Convert scanlineArr -> scanlineSet + scanlineHeap
-    // (scanlineArr is already unique by construction).
+    // Convert scanlineArr -> scanlineHeap
     const arr = this.scanlineArr;
     for (let i = 0, len = arr.length; i < len; i++) {
       const y = arr[i];
-      this.scanlineSet.add(y);
       this.scanlineHeap.push(y);
     }
     arr.length = 0;
@@ -813,18 +818,24 @@ private static topX(ae: Active, currentY: number): number {
       if (arr.length > 64) this.upgradeScanlineStructureFromArray();
       return;
     }
-    if (this.scanlineSet.has(y)) return;
-    this.scanlineSet.add(y);
+    // duplicates are allowed here and popped together in popScanline
     this.scanlineHeap.push(y);
   }
 
   // Returns the next scanline Y value, or null if empty.
   // Avoids allocating a wrapper object on every call in the main sweep loop.
+  // The next scanline is the larger of the next local minima's y (local minima
+  // are sorted by descending y) and the top of the scanline list. A y taken
+  // from a local minima isn't consumed here; it stays pending until
+  // popLocalMinima, so insertLocalMinimaIntoAEL must run before the next pop.
   private popScanline(): number | null {
+    const hasLocMin = this.hasLocMin;
+    const locMinY = this.nextLocMinY;
+
     if (this.useScanlineArray) {
       const arr = this.scanlineArr;
       const len = arr.length;
-      if (len === 0) return null;
+      if (len === 0) return hasLocMin ? locMinY : null;
       let bestIdx = 0;
       let bestY = arr[0];
       for (let i = 1; i < len; i++) {
@@ -834,23 +845,29 @@ private static topX(ae: Active, currentY: number): number {
           bestIdx = i;
         }
       }
+      if (hasLocMin && locMinY > bestY) return locMinY;
       arr[bestIdx] = arr[len - 1];
       arr.pop();
       return bestY;
     }
-    const y = this.scanlineHeap.pop();
-    if (y === null) return null;
-    this.scanlineSet.delete(y);
-    return y;
+
+    const top = this.scanlineHeap.peek();
+    if (top === null) return hasLocMin ? locMinY : null;
+    if (hasLocMin && locMinY > top) return locMinY;
+    this.scanlineHeap.pop();
+    while (this.scanlineHeap.peek() === top) this.scanlineHeap.pop(); // pop duplicates
+    return top;
   }
 
   private hasLocMinAtY(y: number): boolean {
-    return this.currentLocMin < this.minimaList.length && 
-            this.minimaList[this.currentLocMin].vertex.pt.y === y;
+    return this.hasLocMin && this.nextLocMinY === y;
   }
 
   private popLocalMinima(): LocalMinima {
-    return this.minimaList[this.currentLocMin++];
+    const lm = this.minimaList[this.currentLocMin++];
+    this.hasLocMin = this.currentLocMin < this.minimaList.length;
+    this.nextLocMinY = this.hasLocMin ? this.minimaList[this.currentLocMin].vertex.pt.y : 0;
+    return lm;
   }
 
   protected addPath(path: Path64, polytype: PathType, isOpen: boolean = false): void {
