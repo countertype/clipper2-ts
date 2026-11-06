@@ -3237,8 +3237,12 @@ private checkSplitOwner(outrec: OutRec, splits: number[]): boolean {
   // nb: use indexing (not an iterator) in case 'splits' is modified inside this loop (#1029)
   for (let i = 0; i < splits.length; i++) {
     let split: OutRec | null = this.outrecList[splits[i]];
-    if (split.pts === null && split.splits !== null &&
-      this.checkSplitOwner(outrec, split.splits)) return true; // #942
+    if (split.pts === null && split.splits !== null) {
+      // emptied OutRecs can reference each other through their splits
+      if (split.recursiveSplit === outrec) continue;
+      split.recursiveSplit = outrec;
+      if (this.checkSplitOwner(outrec, split.splits)) return true; // #942
+    }
     split = this.getRealOutRec(split);
     if (split === null || split === outrec || split.recursiveSplit === outrec) continue;
     split.recursiveSplit = outrec; // #599
