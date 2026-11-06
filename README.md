@@ -41,6 +41,19 @@ const xorResult = xor(subject, clip, FillRule.NonZero);
 const offset = inflatePaths(subject, 10, JoinType.Round, EndType.Polygon);
 ```
 
+### CommonJS on modern Node.js
+
+On Node.js 20.19+, 22.12+, or 23+, synchronous `require()` can load the same ES
+module entry point through the `module-sync` export condition:
+
+```javascript
+const { intersect, FillRule } = require('clipper2-ts');
+```
+
+This also supports TypeScript CLI tools that compile imports to `require()`.
+There is no separate CommonJS build; older Node.js versions must use `import()`
+from CommonJS instead.
+
 ### Triangulation
 
 Convert polygons into triangles using constrained Delaunay triangulation:
