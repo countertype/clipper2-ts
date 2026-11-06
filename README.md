@@ -41,18 +41,17 @@ const xorResult = xor(subject, clip, FillRule.NonZero);
 const offset = inflatePaths(subject, 10, JoinType.Round, EndType.Polygon);
 ```
 
-### CommonJS on modern Node.js
+### CommonJS
 
-On Node.js 20.19+, 22.12+, or 23+, synchronous `require()` can load the same ES
-module entry point through the `module-sync` export condition:
+The package ships as ES modules only. Node.js 20.19+, 22.12+ and 23+ can
+`require()` it directly, as can bundlers:
 
 ```javascript
 const { intersect, FillRule } = require('clipper2-ts');
 ```
 
-This also supports TypeScript CLI tools that compile imports to `require()`.
-There is no separate CommonJS build; older Node.js versions must use `import()`
-from CommonJS instead.
+This also covers TypeScript CLI tools that compile imports to `require()`.
+Older Node.js versions must use `import()` from CommonJS instead.
 
 ### Triangulation
 

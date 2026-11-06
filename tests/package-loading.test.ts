@@ -1,33 +1,17 @@
-// Exercise the shipped package with Node's loaders rather than Vitest's source resolver.
+// Exercise the package.json exports map through Node's own loaders rather than
+// Vitest's source resolver. A package can reference itself by name when it has
+// an "exports" field, so no pack or install is needed. Requires a built dist/
+// (the prepare script builds it on npm install).
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { describe, expect, test } from 'vitest';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const supportsRequireEsm = Boolean(process.features.require_module);
-let consumer: string;
 
-function npm(args: string[], cwd: string): string {
-  const cli = process.env.npm_execpath;
-  if (!cli) throw new Error('Run the package-loading tests through npm test.');
-  return execFileSync(process.execPath, [cli, ...args], {
-    cwd,
-    encoding: 'utf8',
-    timeout: 60_000,
-  });
-}
-
-function node(source: string, mode: 'module' | 'commonjs'): void {
-  execFileSync(process.execPath, [`--input-type=${mode}`, '--eval', source], {
-    cwd: consumer,
-    timeout: 10_000,
-  });
-}
-
-// A real operation ensures the installed entry point loads its dependency graph too.
+// A real operation ensures the entry point loads its dependency graph too.
 const checkIntersection = `
   const square = (x, y) => [
     { x, y }, { x: x + 10, y },
@@ -37,42 +21,43 @@ const checkIntersection = `
   assert.equal(Math.abs(clipper.areaPaths(result)), 25);
 `;
 
-describe('installed package loading', () => {
-  beforeAll(() => {
-    consumer = mkdtempSync(join(tmpdir(), 'clipper2-ts-package-'));
-    npm(['run', 'build'], root);
-    const packed = JSON.parse(npm([
-      'pack', '--ignore-scripts', '--json', '--pack-destination', consumer,
-    ], root)) as { filename: string }[];
-    writeFileSync(join(consumer, 'package.json'), JSON.stringify({ private: true }));
-    npm([
-      'install', '--ignore-scripts', '--no-audit', '--no-fund',
-      join(consumer, packed[0]!.filename),
-    ], consumer);
-  }, 120_000);
+// Runs source with Node in the package root. On failure the child's stderr
+// (the loader's own message) is included in the thrown error.
+function node(source: string, mode: 'module' | 'commonjs'): void {
+  try {
+    execFileSync(process.execPath, [`--input-type=${mode}`, '--eval', source], {
+      cwd: root,
+      stdio: ['ignore', 'ignore', 'pipe'],
+      timeout: 10_000,
+    });
+  } catch (err) {
+    const stderr = (err as { stderr?: Buffer }).stderr?.toString() ?? '';
+    throw new Error(`node --input-type=${mode} failed:\n${stderr}`, { cause: err });
+  }
+}
 
-  afterAll(() => {
-    if (consumer) rmSync(consumer, { recursive: true, force: true });
+describe('package exports', () => {
+  test('dist is built', () => {
+    expect(existsSync(new URL('../dist/index.js', import.meta.url)),
+      'dist/index.js is missing; run npm run build').toBe(true);
   });
 
-  test('ES module import performs a polygon intersection', () => {
-    expect(() => node(`
+  test('ES module import resolves through the exports map', () => {
+    node(`
       import assert from 'node:assert/strict';
       import * as clipper from 'clipper2-ts';
       ${checkIntersection}
-    `, 'module')).not.toThrow();
+    `, 'module');
   });
 
-  test.skipIf(!supportsRequireEsm)('CommonJS require performs a polygon intersection', () => {
-    expect(() => node(`
-      const assert = require('node:assert/strict');
-      const clipper = require('clipper2-ts');
-      ${checkIntersection}
-    `, 'commonjs')).not.toThrow();
+  test.skipIf(!supportsRequireEsm)('CommonJS require resolves through the exports map', () => {
+    const clipper = createRequire(import.meta.url)('clipper2-ts');
+    expect(typeof clipper.intersect).toBe('function');
+    expect(typeof clipper.Clipper64).toBe('function');
   });
 
-  test.skipIf(!supportsRequireEsm)('import and require share functions and constructors', () => {
-    expect(() => node(`
+  test.skipIf(!supportsRequireEsm)('import and require share one module instance', () => {
+    node(`
       import assert from 'node:assert/strict';
       import { createRequire } from 'node:module';
       import * as imported from 'clipper2-ts';
@@ -80,6 +65,6 @@ describe('installed package loading', () => {
       assert.equal(required.intersect, imported.intersect);
       assert.equal(required.Clipper64, imported.Clipper64);
       assert.ok(new required.Clipper64() instanceof imported.Clipper64);
-    `, 'module')).not.toThrow();
+    `, 'module');
   });
 });
