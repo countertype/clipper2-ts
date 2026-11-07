@@ -117,9 +117,9 @@ function scaleExpansion(
   elen: number, e: Float64Array, b: number, h: Float64Array
 ): number {
   let Q: number, sum: number, hh: number, product1: number, product0: number;
-  let bvirt: number, c: number, ahi: number, alo: number, bhi: number, blo: number;
+  let bvirt: number, c: number, ahi: number, alo: number;
 
-  c = SPLITTER * b; bhi = c - (c - b); blo = b - bhi;
+  c = SPLITTER * b; const bhi = c - (c - b); const blo = b - bhi;
   let enow = e[0];
   Q = enow * b;
   c = SPLITTER * enow; ahi = c - (c - enow); alo = enow - ahi;
@@ -160,7 +160,6 @@ function orient2dadapt(
 ): number {
   let bvirt: number, c: number, ahi: number, alo: number, bhi: number, blo: number;
   let _i: number, _j: number, _0: number, s1: number, s0: number, t1: number, t0: number, u3: number;
-  let acxtail: number, acytail: number, bcxtail: number, bcytail: number;
 
   const acx = ax - cx, bcx = bx - cx, acy = ay - cy, bcy = by - cy;
 
@@ -184,10 +183,10 @@ function orient2dadapt(
   let errbound = ccwerrboundB * detsum;
   if (det >= errbound || -det >= errbound) return det;
 
-  bvirt = ax - acx; acxtail = ax - (acx + bvirt) + (bvirt - cx);
-  bvirt = bx - bcx; bcxtail = bx - (bcx + bvirt) + (bvirt - cx);
-  bvirt = ay - acy; acytail = ay - (acy + bvirt) + (bvirt - cy);
-  bvirt = by - bcy; bcytail = by - (bcy + bvirt) + (bvirt - cy);
+  bvirt = ax - acx; const acxtail = ax - (acx + bvirt) + (bvirt - cx);
+  bvirt = bx - bcx; const bcxtail = bx - (bcx + bvirt) + (bvirt - cx);
+  bvirt = ay - acy; const acytail = ay - (acy + bvirt) + (bvirt - cy);
+  bvirt = by - bcy; const bcytail = by - (bcy + bvirt) + (bvirt - cy);
 
   if (acxtail === 0 && acytail === 0 && bcxtail === 0 && bcytail === 0) return det;
 
@@ -280,8 +279,6 @@ function incircleadapt(
   let bvirt: number, c: number, ahi: number, alo: number, bhi: number, blo: number;
   let _i: number, _j: number, _0: number, s1: number, s0: number, t1: number, t0: number, u3: number;
   let finlen: number;
-  let adxtail: number, bdxtail: number, cdxtail: number;
-  let adytail: number, bdytail: number, cdytail: number;
   let axtbclen = 0, aytbclen = 0, bxtcalen = 0, bytcalen = 0, cxtablen = 0, cytablen = 0;
   let n1: number, n0: number;
 
@@ -354,12 +351,12 @@ function incircleadapt(
   let errbound = iccerrboundB * permanent;
   if (det >= errbound || -det >= errbound) return det;
 
-  bvirt = ax - adx; adxtail = ax - (adx + bvirt) + (bvirt - dx);
-  bvirt = ay - ady; adytail = ay - (ady + bvirt) + (bvirt - dy);
-  bvirt = bx - bdx; bdxtail = bx - (bdx + bvirt) + (bvirt - dx);
-  bvirt = by - bdy; bdytail = by - (bdy + bvirt) + (bvirt - dy);
-  bvirt = cx - cdx; cdxtail = cx - (cdx + bvirt) + (bvirt - dx);
-  bvirt = cy - cdy; cdytail = cy - (cdy + bvirt) + (bvirt - dy);
+  bvirt = ax - adx; const adxtail = ax - (adx + bvirt) + (bvirt - dx);
+  bvirt = ay - ady; const adytail = ay - (ady + bvirt) + (bvirt - dy);
+  bvirt = bx - bdx; const bdxtail = bx - (bdx + bvirt) + (bvirt - dx);
+  bvirt = by - bdy; const bdytail = by - (bdy + bvirt) + (bvirt - dy);
+  bvirt = cx - cdx; const cdxtail = cx - (cdx + bvirt) + (bvirt - dx);
+  bvirt = cy - cdy; const cdytail = cy - (cdy + bvirt) + (bvirt - dy);
 
   if (adxtail === 0 && bdxtail === 0 && cdxtail === 0 &&
       adytail === 0 && bdytail === 0 && cdytail === 0) return det;
