@@ -61,18 +61,21 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.10.1",
-    "@vitest/ui": "^4.0.10",
+    "@vitest/ui": "^4.1.12",
     "eslint": "^10.0.1",
     "gh-pages": "^6.3.0",
     "rolldown": "^1.0.0-rc.3",
     "typescript": "^5.0.0",
-    "typescript-eslint": "8.56.1-alpha.3",
-    "vitest": "^4.0.10"
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^4.1.12"
   },
   "files": [
     "dist/**/*",
     "src/**/*",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "overrides": {
+    "minimatch": "^11.0.5"
+  }
 }

@@ -14,6 +14,10 @@ All changes to this project will be documented in this file
 - `RectClip`: intersections with a rectangle side keep the coordinate on that side exact instead of landing one unit inside after rounding (upstream [#1114](https://github.com/AngusJohnson/Clipper2/pull/1114), [#1095](https://github.com/AngusJohnson/Clipper2/issues/1095))
 - Package loading: the ES module build is exported under the `default` condition, so `require('clipper2-ts')` works on Node.js 20.19+, 22.12+ and 23+ and in bundlers, including TypeScript CLI tools compiled to CommonJS ([#38](https://github.com/countertype/clipper2-ts/pull/38))
 
+### Changed
+
+- Dev dependencies: `vitest` 4.1.12, `typescript-eslint` 8.72.1, `minimatch` overridden to 11; `npm audit` reports no vulnerabilities
+
 ### Performance
 
 - `Engine`: `resetHorzDirection` writes the horizontal's X bounds to fields instead of allocating a result object per call
