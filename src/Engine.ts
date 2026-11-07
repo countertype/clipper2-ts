@@ -40,6 +40,10 @@ push(value: number): void {
   this.siftUp(this.data.length - 1);
 }
 
+peek(): number | null {
+  return this.data.length === 0 ? null : this.data[0];
+}
+
 pop(): number | null {
   if (this.data.length === 0) return null;
   const max = this.data[0];
@@ -529,12 +533,15 @@ export class ClipperBase {
   protected fillrule: FillRule = FillRule.EvenOdd;
   protected actives: Active | null = null;
   protected sel: Active | null = null;
+  // X bounds of the horizontal being processed, written by resetHorzDirection
+  // (C# passes these as 'out' parameters)
+  private horzLeft = 0;
+  private horzRight = 0;
   protected readonly minimaList: LocalMinima[] = [];
   protected readonly intersectList: IntersectNode[] = [];
   protected readonly vertexList: Vertex[] = [];
   protected readonly outrecList: OutRec[] = [];
   protected readonly scanlineHeap = new ScanlineHeap();
-  protected readonly scanlineSet = new Set<number>();
   // For very small inputs, a heap + set can cost more than it saves.
   // Use an array-based scanline mode initially, and upgrade to heap+set
   // automatically if the scanline list grows beyond a threshold.
@@ -543,6 +550,11 @@ export class ClipperBase {
   protected readonly horzSegList: HorzSegment[] = [];
   protected readonly horzJoinList: HorzJoin[] = [];
   protected currentLocMin: number = 0;
+  // y of minimaList[currentLocMin], cached so popScanline doesn't chase
+  // minimaList -> vertex -> pt on every call. hasLocMin is false once all
+  // minima are consumed (an integer sentinel keeps the field a Smi for V8).
+  private nextLocMinY: number = 0;
+  private hasLocMin: boolean = false;
   protected currentBotY: number = 0;
   // True when every active edge's curX already equals topX(edge, topY) for the
   // scanbeam top being processed (set by buildIntersectList when the SEL scan
@@ -743,7 +755,6 @@ private static topX(ae: Active, currentY: number): number {
   protected clearSolutionOnly(): void {
     while (this.actives !== null) this.deleteFromAEL(this.actives);
     this.scanlineHeap.clear();
-    this.scanlineSet.clear();
     this.scanlineArr.length = 0;
     this.disposeIntersectNodes();
     this.outrecList.length = 0;
@@ -767,17 +778,17 @@ private static topX(ae: Active, currentY: number): number {
     }
 
     this.scanlineHeap.clear();
-    this.scanlineSet.clear();
     this.scanlineArr.length = 0;
     // Heuristic: local minima count correlates with number of scanlines and
     // scanline insert/pop activity. For glyph-like inputs, this is typically small.
     this.useScanlineArray = this.minimaList.length <= 16;
-    for (let i = this.minimaList.length - 1; i >= 0; i--) {
-      this.insertScanline(this.minimaList[i].vertex.pt.y);
-    }
+    // the local minima aren't added to the scanline list since they're already
+    // sorted, instead popScanline() merges them with the scanline list
 
     this.currentBotY = 0;
     this.currentLocMin = 0;
+    this.hasLocMin = this.minimaList.length > 0;
+    this.nextLocMinY = this.hasLocMin ? this.minimaList[0].vertex.pt.y : 0;
     this.actives = null;
     this.sel = null;
     this.curXValidAtTop = false;
@@ -785,12 +796,10 @@ private static topX(ae: Active, currentY: number): number {
   }
 
   private upgradeScanlineStructureFromArray(): void {
-    // Convert scanlineArr -> scanlineSet + scanlineHeap
-    // (scanlineArr is already unique by construction).
+    // Convert scanlineArr -> scanlineHeap
     const arr = this.scanlineArr;
     for (let i = 0, len = arr.length; i < len; i++) {
       const y = arr[i];
-      this.scanlineSet.add(y);
       this.scanlineHeap.push(y);
     }
     arr.length = 0;
@@ -809,18 +818,24 @@ private static topX(ae: Active, currentY: number): number {
       if (arr.length > 64) this.upgradeScanlineStructureFromArray();
       return;
     }
-    if (this.scanlineSet.has(y)) return;
-    this.scanlineSet.add(y);
+    // duplicates are allowed here and popped together in popScanline
     this.scanlineHeap.push(y);
   }
 
   // Returns the next scanline Y value, or null if empty.
   // Avoids allocating a wrapper object on every call in the main sweep loop.
+  // The next scanline is the larger of the next local minima's y (local minima
+  // are sorted by descending y) and the top of the scanline list. A y taken
+  // from a local minima isn't consumed here; it stays pending until
+  // popLocalMinima, so insertLocalMinimaIntoAEL must run before the next pop.
   private popScanline(): number | null {
+    const hasLocMin = this.hasLocMin;
+    const locMinY = this.nextLocMinY;
+
     if (this.useScanlineArray) {
       const arr = this.scanlineArr;
       const len = arr.length;
-      if (len === 0) return null;
+      if (len === 0) return hasLocMin ? locMinY : null;
       let bestIdx = 0;
       let bestY = arr[0];
       for (let i = 1; i < len; i++) {
@@ -830,23 +845,29 @@ private static topX(ae: Active, currentY: number): number {
           bestIdx = i;
         }
       }
+      if (hasLocMin && locMinY > bestY) return locMinY;
       arr[bestIdx] = arr[len - 1];
       arr.pop();
       return bestY;
     }
-    const y = this.scanlineHeap.pop();
-    if (y === null) return null;
-    this.scanlineSet.delete(y);
-    return y;
+
+    const top = this.scanlineHeap.peek();
+    if (top === null) return hasLocMin ? locMinY : null;
+    if (hasLocMin && locMinY > top) return locMinY;
+    this.scanlineHeap.pop();
+    while (this.scanlineHeap.peek() === top) this.scanlineHeap.pop(); // pop duplicates
+    return top;
   }
 
   private hasLocMinAtY(y: number): boolean {
-    return this.currentLocMin < this.minimaList.length && 
-            this.minimaList[this.currentLocMin].vertex.pt.y === y;
+    return this.hasLocMin && this.nextLocMinY === y;
   }
 
   private popLocalMinima(): LocalMinima {
-    return this.minimaList[this.currentLocMin++];
+    const lm = this.minimaList[this.currentLocMin++];
+    this.hasLocMin = this.currentLocMin < this.minimaList.length;
+    this.nextLocMinY = this.hasLocMin ? this.minimaList[this.currentLocMin].vertex.pt.y : 0;
+    return lm;
   }
 
   protected addPath(path: Path64, polytype: PathType, isOpen: boolean = false): void {
@@ -1077,9 +1098,9 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       this.getCurrYMaximaVertexOpen(horz) :
       this.getCurrYMaximaVertex(horz);
 
-    const { isLeftToRight, leftX, rightX } = this.resetHorzDirection(horz, vertexMax);
-    let leftX2 = leftX;
-    let rightX2 = rightX;
+    let isLeftToRight = this.resetHorzDirection(horz, vertexMax);
+    let leftX2 = this.horzLeft;
+    let rightX2 = this.horzRight;
 
     if (ClipperBase.isHotEdge(horz)) {
       const op = this.addOutPt(horz, { x: horz.curX, y });
@@ -1182,9 +1203,9 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
 
       this.updateEdgeIntoAEL(horz);
 
-      const resetResult = this.resetHorzDirection(horz, vertexMax);
-      leftX2 = resetResult.leftX;
-      rightX2 = resetResult.rightX;
+      isLeftToRight = this.resetHorzDirection(horz, vertexMax);
+      leftX2 = this.horzLeft;
+      rightX2 = this.horzRight;
     }
 
     if (ClipperBase.isHotEdge(horz)) {
@@ -1200,9 +1221,9 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     const y = horz.bot.y;
     const vertexMax = this.getCurrYMaximaVertex(horz);
 
-    const { isLeftToRight, leftX, rightX } = this.resetHorzDirection(horz, vertexMax);
-    let leftX2 = leftX;
-    let rightX2 = rightX;
+    let isLeftToRight = this.resetHorzDirection(horz, vertexMax);
+    let leftX2 = this.horzLeft;
+    let rightX2 = this.horzRight;
 
     if (ClipperBase.isHotEdge(horz)) {
       const op = this.addOutPt(horz, { x: horz.curX, y });
@@ -1276,9 +1297,9 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
 
       this.updateEdgeIntoAEL(horz);
 
-      const resetResult = this.resetHorzDirection(horz, vertexMax);
-      leftX2 = resetResult.leftX;
-      rightX2 = resetResult.rightX;
+      isLeftToRight = this.resetHorzDirection(horz, vertexMax);
+      leftX2 = this.horzLeft;
+      rightX2 = this.horzRight;
     }
 
     if (ClipperBase.isHotEdge(horz)) {
@@ -1925,21 +1946,28 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     return result;
   }
 
-  private resetHorzDirection(horz: Active, vertexMax: Vertex | null): { isLeftToRight: boolean; leftX: number; rightX: number } {
+  // Returns the sweep direction and writes the horizontal's X bounds to
+  // horzLeft/horzRight (the C# 'out' parameters), avoiding a result object
+  // allocation per call.
+  private resetHorzDirection(horz: Active, vertexMax: Vertex | null): boolean {
     if (horz.bot.x === horz.top.x) {
       // the horizontal edge is going nowhere ...
-      const leftX = horz.curX;
-      const rightX = horz.curX;
+      this.horzLeft = horz.curX;
+      this.horzRight = horz.curX;
       let ae = horz.nextInAEL;
       while (ae !== null && ae.vertexTop !== vertexMax)
         ae = ae.nextInAEL;
-      return { isLeftToRight: ae !== null, leftX, rightX };
+      return ae !== null;
     }
 
     if (horz.curX < horz.top.x) {
-      return { isLeftToRight: true, leftX: horz.curX, rightX: horz.top.x };
+      this.horzLeft = horz.curX;
+      this.horzRight = horz.top.x;
+      return true;
     } else {
-      return { isLeftToRight: false, leftX: horz.top.x, rightX: horz.curX };
+      this.horzLeft = horz.top.x;
+      this.horzRight = horz.curX;
+      return false;
     }
   }
 
@@ -3087,12 +3115,20 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
     prevOp.next = newOp2;
   }
 
-  if (!(absDoubleArea2 > B2) || // area > 1
-      (!(absDoubleArea2 > absDoubleArea1) &&
-        ((doubleArea2 > B0) !== (doubleArea1 > B0)))) return;
-        
+  // A smaller loop of opposite orientation is usually a spurious twist and is
+  // dropped. But when it lies inside the remainder it is a hole the remainder
+  // already covers (the loop's -1 cancels the remainder's +1): dropping it
+  // fills that hole. Keep such a loop as its own (hole) path.
+  if (!(absDoubleArea2 > B2)) return; // area > 1
+  const isHoleOfRemainder = !(absDoubleArea2 > absDoubleArea1) &&
+    ((doubleArea2 > B0) !== (doubleArea1 > B0));
+  if (isHoleOfRemainder &&
+      !ClipperBase.triangleInsidePath(prevOp, ip, splitOp.pt, splitOp.next!.pt)) return;
+
   const newOutRec = this.newOutRec();
-  newOutRec.owner = outrec.owner;
+  // A kept hole is owned by the remainder, so a PolyTree nests it under
+  // that path instead of listing it as a top-level outer (TS fix-up to #1109).
+  newOutRec.owner = isHoleOfRemainder ? outrec : outrec.owner;
   splitOp.outrec = newOutRec;
   splitOp.next!.outrec = newOutRec;
 
@@ -3112,6 +3148,28 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
       if (outrec.splits === null) outrec.splits = [];
       outrec.splits.push(newOutRec.idx);
     }
+  }
+
+  // returns true when the triangle's centroid has a non-zero winding number
+  // relative to the closed path at op (the centroid is kept in doubles so that
+  // it isn't rounded outside a very thin triangle)
+  private static triangleInsidePath(op: OutPt, a: Point64, b: Point64, c: Point64): boolean {
+    const x = (a.x + b.x + c.x) / 3;
+    const y = (a.y + b.y + c.y) / 3;
+    let winding = 0;
+    let op2 = op;
+    do {
+      const p = op2.pt;
+      const q = op2.next!.pt;
+      const cross = (q.x - p.x) * (y - p.y) - (x - p.x) * (q.y - p.y);
+      if (p.y <= y) {
+        if (q.y > y && cross > 0) winding++;
+      } else if (q.y <= y && cross < 0) {
+        winding--;
+      }
+      op2 = op2.next!;
+    } while (op2 !== op);
+    return winding !== 0;
   }
 
   private static areaOutPt(op: OutPt): bigint {
@@ -3196,8 +3254,12 @@ private checkSplitOwner(outrec: OutRec, splits: number[]): boolean {
   // nb: use indexing (not an iterator) in case 'splits' is modified inside this loop (#1029)
   for (let i = 0; i < splits.length; i++) {
     let split: OutRec | null = this.outrecList[splits[i]];
-    if (split.pts === null && split.splits !== null &&
-      this.checkSplitOwner(outrec, split.splits)) return true; // #942
+    if (split.pts === null && split.splits !== null) {
+      // emptied OutRecs can reference each other through their splits
+      if (split.recursiveSplit === outrec) continue;
+      split.recursiveSplit = outrec;
+      if (this.checkSplitOwner(outrec, split.splits)) return true; // #942
+    }
     split = this.getRealOutRec(split);
     if (split === null || split === outrec || split.recursiveSplit === outrec) continue;
     split.recursiveSplit = outrec; // #599

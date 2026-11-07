@@ -286,7 +286,14 @@ export class RectClip64 {
     if (res3 === res4) return null;
 
     // segments must intersect to get here
-    return InternalClipper.getLineIntersectPt(p1, p2, p3, p4);
+    const ip = InternalClipper.getLineIntersectPt(p1, p2, p3, p4);
+    if (ip === null) return null;
+
+    // All callers in this unit intersect against rectangle sides, so keep
+    // the constrained coordinate exact and leave the free coordinate as-is.
+    if (p3.x === p4.x) ip.x = p3.x;
+    else if (p3.y === p4.y) ip.y = p3.y;
+    return ip;
   }
 
   // Reusable result object for getIntersection (all callers consume immediately).
@@ -538,7 +545,8 @@ export class RectClip64 {
         loc = prev;
         const intersection2Result = RectClip64.getIntersection(this.rectPath, prevPt, path[i], loc);
         const ip2 = intersection2Result.point;
-        
+        loc = intersection2Result.newLocation; // C# updates 'loc' by ref (#37)
+
         if (prevCrossLoc !== Location.inside && prevCrossLoc !== loc) { //#597
           this.addCorner(prevCrossLoc, loc);
         }

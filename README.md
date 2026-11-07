@@ -3,7 +3,9 @@
 [![npm version](https://img.shields.io/npm/v/clipper2-ts.svg)](https://www.npmjs.com/package/clipper2-ts)
 [![license](https://img.shields.io/npm/l/clipper2-ts.svg)](https://github.com/countertype/clipper2-ts/blob/main/LICENSE)
 
-TypeScript port of Angus Johnson's [Clipper2](https://github.com/AngusJohnson/Clipper2) library for polygon clipping, offsetting, and triangulation
+TypeScript port of Angus Johnson's [Clipper2](https://github.com/PolyClipping/Clipper2) library for polygon clipping, offsetting, and triangulation
+
+In 2026, the original repository at [AngusJohnson/Clipper2](https://github.com/AngusJohnson/Clipper2) was archived and primary development moved to [PolyClipping/Clipper2](https://github.com/PolyClipping/Clipper2). This port tracks the new repository
 
 ## Installation
 
@@ -40,6 +42,18 @@ const xorResult = xor(subject, clip, FillRule.NonZero);
 // Polygon offsetting (inflate/deflate)
 const offset = inflatePaths(subject, 10, JoinType.Round, EndType.Polygon);
 ```
+
+### CommonJS
+
+The package ships as ES modules only. Node.js 20.19+, 22.12+ and 23+ can
+`require()` it directly, as can bundlers:
+
+```javascript
+const { intersect, FillRule } = require('clipper2-ts');
+```
+
+This also covers TypeScript CLI tools that compile imports to `require()`.
+Older Node.js versions must use `import()` from CommonJS instead.
 
 ### Triangulation
 
@@ -85,11 +99,11 @@ npm run serve
 
 This port follows the structure and functionality of Clipper2's C# implementation, with method names adapted to JavaScript conventions. Where C# uses `PascalCase` for methods (`AddPath`, `Execute`), this port uses `camelCase` (`addPath`, `execute`). Class names remain unchanged
 
-For detailed API documentation, see the [official Clipper2 docs](https://www.angusj.com/clipper2/Docs/Overview.htm)
+For detailed API documentation, see the [upstream Clipper2 docs](https://github.com/PolyClipping/Clipper2/wiki) as well as the [previous full docs from the archived repo](https://www.angusj.com/clipper2/Docs/Overview.htm)
 
 ## Testing
 
-The port includes 258 tests validating against Clipper2's reference test suite:
+The port validates against Clipper2's reference test suite plus regression tests for reported issues:
 
 ```bash
 npm test              # Run all tests

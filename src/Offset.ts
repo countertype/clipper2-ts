@@ -631,6 +631,9 @@ export class ClipperOffset {
     for (const pathIn of group.inPaths) {
       this.pathOut = [];
       const cnt = pathIn.length;
+      if (cnt === 0) continue;
+      // nb: endType is changed below for 2 point joined paths
+      this.endType = group.endType;
 
       if (cnt === 1) {
         // single point

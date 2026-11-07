@@ -212,4 +212,37 @@ describe('PolyTree Hierarchical Structure Tests', () => {
     
     expect(Math.abs(calculatedArea - expectedArea)).toBeLessThan(100); // Small tolerance for rounding
   });
+
+  // Emptied OutRecs whose splits form a cycle used to recurse forever in
+  // checkSplitOwner (PolyClipping/Clipper2 f97d65db, upstream #1084)
+  describe('cyclic splits', () => {
+    function xorToTree(subject: Paths64, clip: Paths64): PolyTree64 {
+      const clipper = new Clipper64();
+      clipper.preserveCollinear = false;
+      if (subject.length > 0) clipper.addSubject(subject);
+      clipper.addClip(clip);
+      const tree = new PolyTree64();
+      const open: Paths64 = [];
+      expect(clipper.execute(ClipType.Xor, FillRule.EvenOdd, tree, open)).toBe(true);
+      return tree;
+    }
+
+    test('13 vertex path', () => {
+      const clip = [Clipper.makePath([3,0, 3,5, 0,3, 5,3, 0,5, 5,3, 0,3, 0,0, 0,3, 5,3, 0,0, 3,3, 2,3])];
+      xorToTree([], clip);
+    });
+
+    test('57 vertex subject and clip', () => {
+      const subject = [
+        Clipper.makePath([1,0, -1,1, 0,-1, 1,1, -1,1, 1,0, 0,-1, -1,1, 0,1, -1,0, 1,-1, -1,2,
+          0,0, 1,2, -2,0, 0,-1, -1,0, 0,0, 0,1, -1,0, -1,-2, -1,1, -1,0]),
+        Clipper.makePath([-1,0, 1,0, -1,-1, 0,1, -2,0, 0,0, -1,-1, -1,1, 0,1, -1,0, 1,0, -2,-1, -1,1, 1,-1]),
+      ];
+      const clip = [
+        Clipper.makePath([-1,1, 0,-1, -1,0, 0,0, -1,1, 0,-1, -1,0, 0,1, 1,1]),
+        Clipper.makePath([0,1, 1,1, -1,0, 0,-1, 0,1, -1,0, 0,0, -1,0, -1,1, 0,0, 1,0]),
+      ];
+      xorToTree(subject, clip);
+    });
+  });
 });

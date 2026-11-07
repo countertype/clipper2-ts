@@ -219,4 +219,29 @@ describe('Polygon Offset Tests', () => {
       expect(path.length).toBeGreaterThanOrEqual(4); // Minimum for a closed polygon
     }
   });
+
+  // PolyClipping/Clipper2 issue #9
+  test('empty paths are skipped and do not change the solution', () => {
+    const line = Clipper.makePath([0,0, 10,0]);
+    for (const et of [EndType.Joined, EndType.Butt, EndType.Square, EndType.Round]) {
+      for (const jt of [JoinType.Square, JoinType.Bevel, JoinType.Round, JoinType.Miter]) {
+        expect(Clipper.inflatePaths([[]], 10, jt, et)).toEqual([]);
+        const expected = Clipper.inflatePaths([line], 10, jt, et);
+        expect(Clipper.inflatePaths([[], line], 10, jt, et)).toEqual(expected);
+        expect(Clipper.inflatePaths([line, []], 10, jt, et)).toEqual(expected);
+      }
+    }
+  });
+
+  test('a 2 point joined path does not change how the following paths are offset', () => {
+    // 2 point joined paths are offset as open paths, but
+    // the paths that follow them should still be joined
+    const line = Clipper.makePath([0,0, 100,0]);
+    const corner = Clipper.makePath([0,1000, 500,1000, 500,1500]);
+    const expected =
+      Clipper.areaPaths(Clipper.inflatePaths([line], 20, JoinType.Miter, EndType.Joined)) +
+      Clipper.areaPaths(Clipper.inflatePaths([corner], 20, JoinType.Miter, EndType.Joined));
+    expect(Clipper.areaPaths(Clipper.inflatePaths([line, corner], 20, JoinType.Miter, EndType.Joined))).toBe(expected);
+    expect(Clipper.areaPaths(Clipper.inflatePaths([corner, line], 20, JoinType.Miter, EndType.Joined))).toBe(expected);
+  });
 });
