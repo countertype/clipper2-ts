@@ -2,6 +2,17 @@
 
 All changes to this project will be documented in this file
 
+## [Unreleased]
+
+### Added
+
+- `Triangulation`: opt-in `preserveCollinear` for `triangulate`, `triangulateD` and `Delaunay`, restoring boundary subdivisions before edge legalization and failing explicitly when exact constraints cannot be retained
+
+### Fixed
+
+- `Triangulation`: remove the recursive fan-angle cutoff, which could leave valid regions partially triangulated while reporting success
+- `Triangulation`: resolve zero-area sweep triangles that otherwise leave T-junctions along aligned hole boundaries, including when Delaunay optimization is disabled
+
 ## [2.0.1-19]
 
 ### Fixed
