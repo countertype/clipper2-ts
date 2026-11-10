@@ -72,14 +72,16 @@ export class Delaunay {
   private readonly horzEdgeStack: Edge[] = [];
   private readonly locMinStack: Vertex2[] = [];
   private readonly useDelaunay: boolean;
+  private readonly preserveCollinear: boolean;
   private firstActive: Edge | null = null;
   private lowermostVertex: Vertex2 | null = null;
   private fastMath: boolean = false;
   private readonly _edgesA: (Edge | null)[] = [null, null, null];
   private readonly _edgesB: (Edge | null)[] = [null, null, null];
 
-  constructor(delaunay: boolean = true) {
+  constructor(delaunay: boolean = true, preserveCollinear: boolean = false) {
     this.useDelaunay = delaunay;
+    this.preserveCollinear = preserveCollinear;
   }
 
   private updateFastMath(paths: Paths64): void {
@@ -365,7 +367,7 @@ export class Delaunay {
     return true;
   }
 
-  private createEdge(v1: Vertex2, v2: Vertex2, k: EdgeKind): Edge {
+  private createEdge(v1: Vertex2, v2: Vertex2, k: EdgeKind, sweeping: boolean = true): Edge {
     const res = new Edge();
     this.allEdges.push(res);
 
@@ -394,29 +396,133 @@ export class Delaunay {
 
     if (k === EdgeKind.loose) {
       this.queuePendingDelaunay(res);
-      this.addEdgeToActives(res);
+      if (sweeping) this.addEdgeToActives(res);
     }
 
     return res;
   }
 
-  private createTriangle(e1: Edge, e2: Edge, e3: Edge): Triangle {
+  private createTriangle(e1: Edge, e2: Edge, e3: Edge, sweeping: boolean = true): Triangle {
     const tri = new Triangle(e1, e2, e3);
     this.allTriangles.push(tri);
 
+    this.attachTriangle(tri, sweeping);
+    return tri;
+  }
+
+  private attachTriangle(tri: Triangle, sweeping: boolean): void {
     for (let i = 0; i < 3; ++i) {
       const e = tri.edges[i];
       if (e.triA !== null) {
         e.triB = tri;
-        this.removeEdgeFromActives(e);
+        if (sweeping) this.removeEdgeFromActives(e);
       } else {
         e.triA = tri;
-        if (!Delaunay.isLooseEdge(e))
+        if (sweeping && !Delaunay.isLooseEdge(e))
           this.removeEdgeFromActives(e);
       }
     }
+  }
 
-    return tri;
+  /** Restore skipped boundary subdivisions before legalizing the new interior edges. */
+  private restoreBoundary(paths: Paths64): boolean {
+    const pointKey = (p: Point64): string => `${p.x},${p.y}`;
+    const edgeKey = (a: Point64, b: Point64): string =>
+      a.x < b.x || (a.x === b.x && a.y < b.y)
+        ? `${pointKey(a)}:${pointKey(b)}` : `${pointKey(b)}:${pointKey(a)}`;
+    const boundary = new Map<string, Edge>();
+    const vertices = new Set<string>();
+    for (const edge of this.allEdges) {
+      if (edge.kind === EdgeKind.loose || edge.triA === null || edge.triB !== null) continue;
+      const key = edgeKey(edge.vL.pt, edge.vR.pt);
+      if (boundary.has(key)) return false;
+      const triangle = Delaunay.pathFromTriangle(edge.triA);
+      if (this.crossProductSign(triangle[0], triangle[1], triangle[2]) === 0) return false;
+      boundary.set(key, edge);
+      vertices.add(pointKey(edge.vL.pt));
+      vertices.add(pointKey(edge.vR.pt));
+    }
+
+    const expected = new Set<string>();
+    for (const path of paths) {
+      // Consecutive duplicates and an explicit closing point do not define constraints.
+      const ring = path.filter((p, i) => i === 0 || pointKey(p) !== pointKey(path[i - 1]));
+      if (ring.length > 1 && pointKey(ring[0]) === pointKey(ring[ring.length - 1])) ring.pop();
+      if (ring.length < 3) continue;
+      for (let i = 0; i < ring.length; i++) {
+        const key = edgeKey(ring[i], ring[(i + 1) % ring.length]);
+        if (expected.has(key)) return false;
+        expected.add(key);
+      }
+      const start = ring.findIndex(p => vertices.has(pointKey(p)));
+      if (start < 0) return false;
+      let previous = ring[start];
+      let pending: Point64[] = [];
+      for (let offset = 1; offset <= ring.length; offset++) {
+        const point = ring[(start + offset) % ring.length];
+        if (!vertices.has(pointKey(point))) {
+          pending.push(point);
+          continue;
+        }
+        let edge = boundary.get(edgeKey(previous, point));
+        if (edge === undefined) return false;
+        for (const split of pending) {
+          // Exact predicates and strict containment: never snap a near-boundary point.
+          if (this.crossProductSign(previous, split, point) !== 0 ||
+            split.x < Math.min(previous.x, point.x) || split.x > Math.max(previous.x, point.x) ||
+            split.y < Math.min(previous.y, point.y) || split.y > Math.max(previous.y, point.y) ||
+            pointKey(split) === pointKey(previous) || pointKey(split) === pointKey(point)) return false;
+          boundary.delete(edgeKey(previous, point));
+          const [first, second] = this.splitBoundaryEdge(edge, split);
+          boundary.set(edgeKey(first.vL.pt, first.vR.pt), first);
+          boundary.set(edgeKey(second.vL.pt, second.vR.pt), second);
+          vertices.add(pointKey(split));
+          previous = split;
+          edge = boundary.get(edgeKey(previous, point))!;
+        }
+        previous = point;
+        pending = [];
+      }
+    }
+    // Reject adjusted, discarded or overlapping constraints rather than return a nonconforming cap.
+    return boundary.size === expected.size && [...expected].every(key => boundary.has(key));
+  }
+
+  private splitBoundaryEdge(edge: Edge, point: Point64): [Edge, Edge] {
+    const triangle = edge.triA!;
+    const a = edge.vL;
+    const b = edge.vR;
+    const sides = triangle.edges.filter(e => e !== edge);
+    const sideA = sides.find(e => Delaunay.edgeContains(e, a) !== EdgeContainsResult.neither)!;
+    const sideB = sides.find(e => e !== sideA)!;
+    const opposite = sideA.vL === a ? sideA.vR : sideA.vL;
+    const vertex = new Vertex2(point);
+    this.allVertices.push(vertex);
+
+    for (const e of triangle.edges) {
+      if (e.triA === triangle) {
+        e.triA = e.triB;
+        e.triB = null;
+      } else e.triB = null;
+      if (e.kind === EdgeKind.loose) this.queuePendingDelaunay(e);
+    }
+    // The sweep has already consumed the vertex edge lists.
+    const first = this.createEdge(a, vertex, edge.kind, false);
+    const second = this.createEdge(vertex, b, edge.kind, false);
+    const diagonal = this.createEdge(vertex, opposite, EdgeKind.loose, false);
+    triangle.edges = [first, diagonal, sideA];
+    this.attachTriangle(triangle, false);
+    this.createTriangle(second, sideB, diagonal, false);
+    return [first, second];
+  }
+
+  private legalize(): void {
+    // Repair collinear sweep triangles even when Delaunay optimization is disabled.
+    while (this.pendingDelaunayStack.length > 0) {
+      const edge = this.pendingDelaunayStack.pop()!;
+      edge.pendingDelaunay = false;
+      this.forceLegal(edge, this.useDelaunay);
+    }
   }
 
   private forceLegal(edge: Edge, delaunay: boolean): void {
@@ -815,11 +921,13 @@ export class Delaunay {
         this.doTriangulateLeft(e, e.vB, currY);
     }
 
-    // Repair collinear sweep triangles even when Delaunay optimization is disabled.
-    while (this.pendingDelaunayStack.length > 0) {
-      const e = this.pendingDelaunayStack.pop()!;
-      e.pendingDelaunay = false;
-      this.forceLegal(e, this.useDelaunay);
+    this.legalize();
+    if (this.preserveCollinear) {
+      if (!this.restoreBoundary(paths)) {
+        this.cleanUp();
+        return { result: TriangulateResult.fail, solution: sol };
+      }
+      this.legalize();
     }
 
     for (const tri of this.allTriangles) {

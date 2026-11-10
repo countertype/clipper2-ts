@@ -79,6 +79,25 @@ if (result === TriangulateResult.success) {
 const { result: resultD, solution: solutionD } = triangulateD(polygon, 2);
 ```
 
+For mesh caps that must match subdivided side walls, enable `preserveCollinear`:
+
+```typescript
+const cap = triangulate(polygon, true, true);
+const capD = triangulateD(polygon, 2, true, true);
+```
+
+The last argument defaults to `false`. When enabled, successful triangulation
+retains every nonzero input boundary segment, including collinear subdivisions
+of outer rings and holes. Consecutive duplicate points and an explicit duplicate
+closing point are ignored. Use non-intersecting, non-touching simple contours
+with opposite winding for holes; reversing all contours together is supported.
+If the sweep discards or adjusts a constraint that cannot be restored exactly,
+the operation returns `TriangulateResult.fail` with no triangles. It never snaps a
+near-collinear point onto an edge. For `triangulateD`, the contract applies to the
+integer grid selected by `decPlaces` (clamped to 0–8), after coordinate rounding.
+Restored points retain their Z values, and inputs are not mutated. The optional
+Delaunay pass also applies to the newly created interior edges.
+
 ### Z-coordinate support
 
 Points can optionally carry a Z value (e.g., elevation, layer index, color). Z callbacks allow you to assign Z values to new vertices created at intersection points. See [Clipper2 Z Docs](https://www.angusj.com/clipper2/Docs/Overview.htm) for details

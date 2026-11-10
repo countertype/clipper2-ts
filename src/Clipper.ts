@@ -1145,12 +1145,18 @@ export function ellipseD(center: PointD, radiusX: number, radiusY: number = 0, s
 }
 
 // Triangulation
-export function triangulate(pp: Paths64, useDelaunay: boolean = true): { result: TriangulateResult, solution: Paths64 } {
-  const d = new Delaunay(useDelaunay);
+/**
+ * Triangulate non-intersecting outer/hole contours. When preserveCollinear is true,
+ * success retains every nonzero input boundary segment; consecutive duplicates and
+ * explicit closing duplicates are ignored. Unrestorable constraints return fail.
+ */
+export function triangulate(pp: Paths64, useDelaunay: boolean = true, preserveCollinear: boolean = false): { result: TriangulateResult, solution: Paths64 } {
+  const d = new Delaunay(useDelaunay, preserveCollinear);
   return d.execute(pp);
 }
 
-export function triangulateD(pp: PathsD, decPlaces: number, useDelaunay: boolean = true): { result: TriangulateResult, solution: PathsD } {
+/** Boundary preservation applies after rounding coordinates to decPlaces (clamped to 0..8). */
+export function triangulateD(pp: PathsD, decPlaces: number, useDelaunay: boolean = true, preserveCollinear: boolean = false): { result: TriangulateResult, solution: PathsD } {
   let scale: number;
   if (decPlaces <= 0) scale = 1.0;
   else if (decPlaces > 8) scale = Math.pow(10.0, 8.0);
@@ -1158,7 +1164,7 @@ export function triangulateD(pp: PathsD, decPlaces: number, useDelaunay: boolean
 
   const pp64 = scalePaths64(pp, scale);
 
-  const d = new Delaunay(useDelaunay);
+  const d = new Delaunay(useDelaunay, preserveCollinear);
   const { result, solution: sol64 } = d.execute(pp64);
 
   let solution: PathsD;
