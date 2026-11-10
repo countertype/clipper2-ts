@@ -61,6 +61,28 @@ describe.each([false, true])('triangulation winding (Delaunay=%s)', delaunay => 
     }
   });
 
+  it('supports more than one hole after reversal', () => {
+    const input = [ring([[0, 0], [200, 0], [200, 80], [0, 80]]), hole,
+      hole.map(p => ({ x: p.x + 100, y: p.y }))].map(p => [...p].reverse());
+    const { result, solution } = triangulate(input, delaunay);
+    expect(result).toBe(TriangulateResult.success);
+    expect(solution).toHaveLength(14);
+    expectCoverage(input, solution);
+  });
+
+  it('retains every boundary segment across aligned holes in both windings', () => {
+    for (let count = 2; count <= 5; count++) for (const reverse of [false, true]) {
+      const paths = [ring([[0, 0], [100 * count, 0], [100 * count, 80], [0, 80]]),
+        ...Array.from({ length: count }, (_, i) => hole.map(p => ({ x: p.x + 100 * i, y: p.y })))];
+      const input = reverse ? paths.map(p => [...p].reverse()) : paths;
+      for (const ordered of [input, [...input].reverse()]) {
+        const { result, solution } = triangulate(ordered, delaunay);
+        expect(result).toBe(TriangulateResult.success);
+        expectCoverage(ordered, solution);
+      }
+    }
+  });
+
   it('fixes the floating-point entry point too', () => {
     const input = [outer, hole].map(p => [...p].reverse().map(({ x, y }) => ({ x: x / 10, y: y / 10 })));
     const { result, solution } = triangulateD(input, 1, delaunay);
