@@ -82,8 +82,10 @@ const { result: resultD, solution: solutionD } = triangulateD(polygon, 2);
 For mesh caps that must match subdivided side walls, enable `preserveCollinear`:
 
 ```typescript
-const cap = triangulate(polygon, true, true);
-const capD = triangulateD(polygon, 2, true, true);
+const useDelaunay = true;
+const preserveCollinear = true;
+const cap = triangulate(polygon, useDelaunay, preserveCollinear);
+const capD = triangulateD(polygon, 2, useDelaunay, preserveCollinear);
 ```
 
 The last argument defaults to `false`. When enabled, successful triangulation
@@ -92,9 +94,14 @@ of outer rings and holes. Consecutive duplicate points and an explicit duplicate
 closing point are ignored. Use non-intersecting, non-touching simple contours
 with opposite winding for holes; reversing all contours together is supported.
 If the sweep discards or adjusts a constraint that cannot be restored exactly,
-the operation returns `TriangulateResult.fail` with no triangles. It never snaps a
-near-collinear point onto an edge. For `triangulateD`, the contract applies to the
-integer grid selected by `decPlaces` (clamped to 0–8), after coordinate rounding.
+the operation returns `TriangulateResult.fail` with no triangles. With preservation
+enabled, `fail` can therefore mean that boundary constraints cannot be restored,
+even when simplified triangulation could succeed. A consumer that permits
+simplified output may explicitly retry with `preserveCollinear = false`; a mesh
+cap that must conform to side walls must reject that failure. There is no automatic
+fallback. The operation never snaps a near-collinear point onto an edge. For
+`triangulateD`, the contract applies to the integer grid selected by `decPlaces`
+(clamped to 0–8), after coordinate rounding.
 Restored points retain their Z values, and inputs are not mutated. The optional
 Delaunay pass also applies to the newly created interior edges.
 

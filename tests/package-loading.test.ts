@@ -4,7 +4,6 @@
 // (the prepare script builds it on npm install).
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
 
@@ -24,8 +23,8 @@ const checkIntersection = `
 // Use the built public entry points so declaration/build omissions cannot hide in source tests.
 const checkBoundary = `
   const ring = [[0,0], [20,0], [40,0], [40,40], [0,40]].map(([x,y]) => ({x,y}));
-  const {result, solution} = clipper.triangulate([ring], true, true);
-  assert.equal(result, clipper.TriangulateResult.success);
+  const {result: boundaryResult, solution} = clipper.triangulate([ring], true, true);
+  assert.equal(boundaryResult, clipper.TriangulateResult.success);
   assert.equal(solution.length, 3);
   assert.equal(clipper.areaPaths(solution), 1600);
   const key = (a,b) => [a.x + ',' + a.y, b.x + ',' + b.y].sort().join(':');
@@ -63,13 +62,19 @@ describe('package exports', () => {
       import assert from 'node:assert/strict';
       import * as clipper from 'clipper2-ts';
       ${checkIntersection}
+      ${checkBoundary}
     `, 'module');
   });
 
   test.skipIf(!supportsRequireEsm)('CommonJS require resolves through the exports map', () => {
-    const clipper = createRequire(import.meta.url)('clipper2-ts');
-    expect(typeof clipper.intersect).toBe('function');
-    expect(typeof clipper.Clipper64).toBe('function');
+    node(`
+      const assert = require('node:assert/strict');
+      const clipper = require('clipper2-ts');
+      assert.equal(typeof clipper.intersect, 'function');
+      assert.equal(typeof clipper.Clipper64, 'function');
+      ${checkIntersection}
+      ${checkBoundary}
+    `, 'commonjs');
   });
 
   test.skipIf(!supportsRequireEsm)('import and require share one module instance', () => {
@@ -82,22 +87,6 @@ describe('package exports', () => {
       assert.equal(required.Clipper64, imported.Clipper64);
       assert.ok(new required.Clipper64() instanceof imported.Clipper64);
     `, 'module');
-  });
-
-  test('boundary preservation is available through the ES module entry point', () => {
-    node(`
-      import assert from 'node:assert/strict';
-      import * as clipper from 'clipper2-ts';
-      ${checkBoundary}
-    `, 'module');
-  });
-
-  test.skipIf(!supportsRequireEsm)('boundary preservation is available through CommonJS', () => {
-    node(`
-      const assert = require('node:assert/strict');
-      const clipper = require('clipper2-ts');
-      ${checkBoundary}
-    `, 'commonjs');
   });
 
   test('boundary preservation survives the minified bundle', () => {

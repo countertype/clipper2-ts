@@ -79,6 +79,12 @@ export class Delaunay {
   private readonly _edgesA: (Edge | null)[] = [null, null, null];
   private readonly _edgesB: (Edge | null)[] = [null, null, null];
 
+  /**
+   * Unrestorable constraints make execute return fail; retry without preservation
+   * only if simplified output is acceptable, never for a cap requiring conformity.
+   * @param delaunay Optimize interior edges using Delaunay legalization (default true).
+   * @param preserveCollinear Retain every nonzero boundary segment exactly (default false).
+   */
   constructor(delaunay: boolean = true, preserveCollinear: boolean = false) {
     this.useDelaunay = delaunay;
     this.preserveCollinear = preserveCollinear;
@@ -506,7 +512,9 @@ export class Delaunay {
       } else e.triB = null;
       if (e.kind === EdgeKind.loose) this.queuePendingDelaunay(e);
     }
-    // The sweep has already consumed the vertex edge lists.
+    // The detached long edge intentionally remains in allEdges until cleanUp,
+    // with both triangle links cleared above. The sweep has already consumed
+    // vertex adjacency, so do not remove it from the endpoint edge lists.
     const first = this.createEdge(a, vertex, edge.kind, false);
     const second = this.createEdge(vertex, b, edge.kind, false);
     const diagonal = this.createEdge(vertex, opposite, EdgeKind.loose, false);
