@@ -565,7 +565,7 @@ export class Delaunay {
   }
 
 
-  private doTriangulateLeft(edge: Edge, pivot: Vertex2, minY: number, limitFan = false): void {
+  private doTriangulateLeft(edge: Edge, pivot: Vertex2, minY: number): void {
     let vAlt: Vertex2 | null = null;
     let eAlt: Edge | null = null;
 
@@ -589,13 +589,6 @@ export class Delaunay {
 
     if (vAlt === null || vAlt.pt.y < minY || eAlt === null) return;
 
-    // Domiter & Zalik 2008, §3.2: stop fan extension when angle at pivot > pi/2
-    if (limitFan) {
-      const dvx = v.pt.x - pivot.pt.x, dvy = v.pt.y - pivot.pt.y;
-      const dax = vAlt.pt.x - pivot.pt.x, day = vAlt.pt.y - pivot.pt.y;
-      if (dvx * dax + dvy * day < 0) return;
-    }
-
     if (vAlt.pt.y < pivot.pt.y) {
       if (Delaunay.isLeftEdge(eAlt)) return;
     } else if (vAlt.pt.y > pivot.pt.y) {
@@ -610,10 +603,10 @@ export class Delaunay {
     this.createTriangle(edge, eAlt, eX);
 
     if (!Delaunay.edgeCompleted(eX))
-      this.doTriangulateLeft(eX, vAlt, minY, true);
+      this.doTriangulateLeft(eX, vAlt, minY);
   }
 
-  private doTriangulateRight(edge: Edge, pivot: Vertex2, minY: number, limitFan = false): void {
+  private doTriangulateRight(edge: Edge, pivot: Vertex2, minY: number): void {
     let vAlt: Vertex2 | null = null;
     let eAlt: Edge | null = null;
 
@@ -637,13 +630,6 @@ export class Delaunay {
 
     if (vAlt === null || vAlt.pt.y < minY || eAlt === null) return;
 
-    // Domiter & Zalik 2008, §3.2: stop fan extension when angle at pivot > pi/2
-    if (limitFan) {
-      const dvx = v.pt.x - pivot.pt.x, dvy = v.pt.y - pivot.pt.y;
-      const dax = vAlt.pt.x - pivot.pt.x, day = vAlt.pt.y - pivot.pt.y;
-      if (dvx * dax + dvy * day < 0) return;
-    }
-
     if (vAlt.pt.y < pivot.pt.y) {
       if (Delaunay.isRightEdge(eAlt)) return;
     } else if (vAlt.pt.y > pivot.pt.y) {
@@ -658,7 +644,7 @@ export class Delaunay {
     this.createTriangle(edge, eX, eAlt);
 
     if (!Delaunay.edgeCompleted(eX))
-      this.doTriangulateRight(eX, vAlt, minY, true);
+      this.doTriangulateRight(eX, vAlt, minY);
   }
 
   private addEdgeToActives(edge: Edge): void {

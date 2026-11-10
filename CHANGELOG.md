@@ -2,6 +2,12 @@
 
 All changes to this project will be documented in this file
 
+## [Unreleased]
+
+### Fixed
+
+- `Triangulation`: remove the recursive fan-angle cutoff, which could leave valid regions partially triangulated while reporting success
+
 ## [2.0.1-19]
 
 ### Fixed
