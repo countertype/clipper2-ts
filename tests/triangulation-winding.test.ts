@@ -1,4 +1,4 @@
-// Reversing all contours must preserve coverage, including holes with horizontal minima.
+// Preserve coverage across contour windings and minima, including aligned-hole boundary conformity.
 import { describe, expect, it } from 'vitest';
 import { areaPaths, triangulate, triangulateD, TriangulateResult } from '../src/index';
 import type { Path64, Paths64, Point64 } from '../src/index';
@@ -9,7 +9,7 @@ const hole = ring([[20, 20], [20, 60], [60, 60], [60, 20]]);
 const edgeKey = (a: Point64, b: Point64): string =>
   [`${a.x},${a.y}`, `${b.x},${b.y}`].sort().join(':');
 
-function expectCoverage(input: Paths64, solution: Paths64): void {
+function expectCoverage(input: Paths64, solution: Paths64, holeCenter: Point64 = { x: 40, y: 40 }): void {
   expect(solution.reduce((sum, t) => sum + Math.abs(areaPaths([t])), 0))
     .toBe(Math.abs(areaPaths(input)));
   const expected = new Set(input.flatMap(p => p.map((a, i) => edgeKey(a, p[(i + 1) % p.length]))));
@@ -24,7 +24,7 @@ function expectCoverage(input: Paths64, solution: Paths64): void {
     // The square-hole center must remain outside every triangle.
     const signs = triangle.map((a, i) => {
       const b = triangle[(i + 1) % 3];
-      return (b.x - a.x) * (40 - a.y) - (b.y - a.y) * (40 - a.x);
+      return (b.x - a.x) * (holeCenter.y - a.y) - (b.y - a.y) * (holeCenter.x - a.x);
     });
     expect(signs.every(s => s >= 0) || signs.every(s => s <= 0)).toBe(false);
   }
@@ -52,8 +52,7 @@ describe.each([false, true])('triangulation winding (Delaunay=%s)', delaunay => 
         for (const paths of [input, [...input].reverse()]) {
           const { result, solution } = triangulate(paths, delaunay);
           expect(result).toBe(TriangulateResult.success);
-          // The independent center test in expectCoverage uses the unrotated fixture.
-          if (!rotate) expectCoverage(paths, solution);
+          expectCoverage(paths, solution, rotate ? { x: 0, y: 80 } : { x: 40, y: 40 });
           expect(solution).toHaveLength(8);
           expect(areaPaths(solution)).toBe(rotate ? 9600 : 4800);
         }
