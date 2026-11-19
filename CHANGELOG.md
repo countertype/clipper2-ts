@@ -27,6 +27,10 @@ All changes to this project will be documented in this file
 - `Offset`: only a group with a closed path decides the orientation of the solution. An empty group, or one holding only a line, ahead of a clockwise polygon emptied the result (PolyClipping/Clipper2 [ca30bebd](https://github.com/PolyClipping/Clipper2/commit/ca30bebd), [#9](https://github.com/PolyClipping/Clipper2/issues/9)). Empty paths are dropped when a group is created
 - `Offset`: a single point in a `Polygon` or `Joined` group is offset to a square or circle, as it is for the other end types and in C++. `stripDuplicates` removed it as a duplicate of itself. A single point is skipped when its delta is below 1, as in C++
 
+### Performance
+
+- `Engine`: `PolyTree` output no longer tests every candidate child against every edge of its parent. A `StripeIndex` buckets a large ring's edges into horizontal stripes, so each point-in-polygon test scans one stripe (PolyClipping/Clipper2 [884ba82](https://github.com/PolyClipping/Clipper2/commit/884ba82)). A union of a 20,000 point ring with 2,000 holes went from 276 ms to 7.5 ms with `PolyTree` output, and a 100,000 point ring with 5,000 holes from 3.2 s to 47 ms. Rings of 64 edges or fewer use the plain test, and the trees are identical either way. `pipIndexThreshold` on the clipper sets that limit
+
 ### Changed
 
 - `Offset`: **the solution's outer paths are now wound positively whatever the orientation of the input** (PolyClipping/Clipper2 [64a9ecc](https://github.com/PolyClipping/Clipper2/commit/64a9ecc), [#13](https://github.com/PolyClipping/Clipper2/issues/13)). Offsetting a clockwise polygon used to return a clockwise (negative) path and now returns a positive one; `reverseSolution` gives negative output for any input. Code that relied on "clockwise in, clockwise out" needs to reverse the result or set `reverseSolution`

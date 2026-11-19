@@ -163,6 +163,163 @@ export enum JoinWith { None, Left, Right }
 export enum HorzPosition { Bottom, Middle, Top }
 
 // OutRec: path data structure for clipping solutions
+// Buckets a ring's edges into horizontal Y stripes so a PIP query only scans the
+// stripe spanning pt.y (~O(sqrt n) vs O(n)). After KiCad's POLY_YSTRIPES_INDEX.
+export class StripeIndex {
+  private edgeA: Point64[] = [];
+  private edgeB: Point64[] = [];
+  private stripes: number[][] = [];
+  private yMin: number = 0;
+  private stripeHeight: number = 1;
+  private stripeCount: number = 1;
+
+  public get edgeCount(): number { return this.edgeA.length; }
+  public get empty(): boolean { return this.edgeA.length === 0; }
+
+  // nb: only needs to be monotonic in y, which it is even where the subtraction
+  // rounds, since an edge and a point between its ends then land in stripes in order
+  private yToStripe(y: number): number {
+    const s = Math.trunc((y - this.yMin) / this.stripeHeight);
+    if (s < 0) return 0;
+    if (s >= this.stripeCount) return this.stripeCount - 1;
+    return s;
+  }
+
+  private build(edgeA: Point64[], edgeB: Point64[]): void {
+    this.edgeA = edgeA;
+    this.edgeB = edgeB;
+    this.stripes = [];
+    const cnt = edgeA.length;
+
+    if (cnt === 0) {
+      this.yMin = 0;
+      this.stripeHeight = 1;
+      this.stripeCount = 1;
+      return;
+    }
+
+    let yMin = edgeA[0].y;
+    let yMax = yMin;
+    for (let i = 0; i < cnt; i++) {
+      const ay = edgeA[i].y, by = edgeB[i].y;
+      if (ay < yMin) yMin = ay;
+      if (by < yMin) yMin = by;
+      if (ay > yMax) yMax = ay;
+      if (by > yMax) yMax = by;
+    }
+    this.yMin = yMin;
+
+    // Brute force calls every point outside a zero-height ring, even one on the ring,
+    // so decline it rather than answer IsOn.
+    if (yMax === yMin) {
+      this.edgeA = [];
+      this.edgeB = [];
+      return;
+    }
+
+    let stripeCount = Math.trunc(Math.sqrt(cnt));
+    if (stripeCount < 1) stripeCount = 1;
+    if (stripeCount > 65536) stripeCount = 65536;
+    this.stripeCount = stripeCount;
+    this.stripeHeight = Math.max(1, Math.floor((yMax - yMin + stripeCount - 1) / stripeCount));
+
+    // Decline rings whose edges each span many stripes (tall "comb" edges); indexing
+    // loses to brute force there. An empty index signals the fallback to callers.
+    let totalRefs = 0;
+    for (let i = 0; i < cnt; i++) {
+      const ay = edgeA[i].y, by = edgeB[i].y;
+      totalRefs += this.yToStripe(ay > by ? ay : by) - this.yToStripe(ay < by ? ay : by) + 1;
+    }
+
+    if (totalRefs > cnt * 8) {
+      this.edgeA = [];
+      this.edgeB = [];
+      return;
+    }
+
+    const stripes: number[][] = new Array<number[]>(stripeCount);
+    for (let s = 0; s < stripeCount; s++) stripes[s] = [];
+
+    for (let i = 0; i < cnt; i++) {
+      const ay = edgeA[i].y, by = edgeB[i].y;
+      const sMin = this.yToStripe(ay < by ? ay : by);
+      const sMax = this.yToStripe(ay > by ? ay : by);
+      for (let s = sMin; s <= sMax; s++) stripes[s].push(i);
+    }
+    this.stripes = stripes;
+  }
+
+  public buildFromPath(path: Path64): void {
+    const edgeA: Point64[] = [];
+    const edgeB: Point64[] = [];
+    const cnt = path.length;
+
+    if (cnt >= 3) {
+      for (let i = 0, j = cnt - 1; i < cnt; j = i++) {
+        if (path[j].x !== path[i].x || path[j].y !== path[i].y) {
+          edgeA.push(path[j]);
+          edgeB.push(path[i]);
+        }
+      }
+    }
+    this.build(edgeA, edgeB);
+  }
+
+  public buildFromRing(op: OutPt | null): void {
+    const edgeA: Point64[] = [];
+    const edgeB: Point64[] = [];
+
+    if (op !== null && op.next !== op && op.prev !== op.next) {
+      let cur = op;
+      do {
+        const nxt = cur.next!;
+        if (cur.pt.x !== nxt.pt.x || cur.pt.y !== nxt.pt.y) {
+          edgeA.push(cur.pt);
+          edgeB.push(nxt.pt);
+        }
+        cur = nxt;
+      } while (cur !== op);
+    }
+    this.build(edgeA, edgeB);
+  }
+
+  public pointInPolygon(pt: Point64): PointInPolygonResult {
+    if (this.edgeA.length === 0) return PointInPolygonResult.IsOutside;
+
+    const stripe = this.stripes[this.yToStripe(pt.y)];
+    const edgeA = this.edgeA, edgeB = this.edgeB;
+    const px = pt.x, py = pt.y;
+    let inside = false;
+
+    for (let k = 0, len = stripe.length; k < len; k++) {
+      const a = edgeA[stripe[k]];
+      const b = edgeB[stripe[k]];
+
+      // TS: an edge wholly above or below the point can neither hold it nor cross its
+      // level, so the cross product (which may need BigInt) is only taken for the rest
+      const aAbove = a.y > py, bAbove = b.y > py;
+      if (aAbove === bAbove && a.y !== py && b.y !== py) continue;
+
+      const cross = InternalClipper.crossProductSign(a, b, pt);
+
+      // On-segment needs the bbox check; collinear (cross == 0) alone catches points
+      // on the edge's infinite line but off the segment.
+      if (cross === 0 &&
+        px >= (a.x < b.x ? a.x : b.x) && px <= (a.x > b.x ? a.x : b.x) &&
+        py >= (a.y < b.y ? a.y : b.y) && py <= (a.y > b.y ? a.y : b.y)) {
+        return PointInPolygonResult.IsOn;
+      }
+
+      // Half-open crossing so horizontal edges never affect parity (IsOn only).
+      if (aAbove !== bAbove) {
+        if (bAbove ? cross > 0 : cross < 0) inside = !inside;
+      }
+    }
+
+    return inside ? PointInPolygonResult.IsInside : PointInPolygonResult.IsOutside;
+  }
+}
+
 export class OutRec {
   public idx: number = 0;
   public owner: OutRec | null = null;
@@ -175,6 +332,8 @@ export class OutRec {
   public isOpen: boolean = false;
   public splits: number[] | null = null;
   public recursiveSplit: OutRec | null = null;
+  // Lazily built during PolyTree nesting; only valid once pts is stable.
+  public pipIndex: StripeIndex | null = null;
 }
 
 export class HorzSegment {
@@ -577,6 +736,10 @@ export class ClipperBase {
 
   public preserveCollinear: boolean = true;
   public reverseSolution: boolean = false;
+  // Ring edge count below which a StripeIndex does not pay off when nesting a PolyTree;
+  // brute force instead. 64 is upstream's empirical break-even. Also a testing knob:
+  // high forces brute-force nesting, low forces stripe indexing.
+  public pipIndexThreshold: number = 64;
 
   constructor() {}
 
@@ -1560,6 +1723,45 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     } while (op !== op1);
     // result is unclear, so try again using cleaned paths
     return InternalClipper.path2ContainsPath1(this.getCleanPath(op1), this.getCleanPath(op2)); // (#973)
+  }
+
+  // path1InsidePath2 variant using a StripeIndex cached on the owner. Small owners
+  // and the ambiguity fallback defer to the brute-force version, so results match.
+  protected path1InsideOwner(op1: OutPt, owner: OutRec): boolean {
+    if (owner.path.length <= this.pipIndexThreshold) {
+      return this.path1InsidePath2(op1, owner.pts!);
+    }
+
+    let index = owner.pipIndex;
+    if (index === null) {
+      index = new StripeIndex();
+      index.buildFromRing(owner.pts);
+      owner.pipIndex = index;
+    }
+
+    // Empty means the index declined this ring (see StripeIndex.build).
+    if (index.empty) return this.path1InsidePath2(op1, owner.pts!);
+
+    let pip = PointInPolygonResult.IsOn;
+    let op = op1;
+    do {
+      switch (index.pointInPolygon(op.pt)) {
+        case PointInPolygonResult.IsOutside:
+          if (pip === PointInPolygonResult.IsOutside) return false;
+          pip = PointInPolygonResult.IsOutside;
+          break;
+        case PointInPolygonResult.IsInside:
+          if (pip === PointInPolygonResult.IsInside) return true;
+          pip = PointInPolygonResult.IsInside;
+          break;
+        default:
+          break;
+      }
+      op = op.next!;
+    } while (op !== op1);
+
+    // ambiguous, defer to the exact cleaned-path test
+    return InternalClipper.path2ContainsPath1(this.getCleanPath(op1), this.getCleanPath(owner.pts!)); // (#973)
   }
 
   private pointInOpPolygon(pt: Point64, op: OutPt): PointInPolygonResult {
@@ -3018,7 +3220,7 @@ protected buildTree(polytree: PolyPathBase, solutionOpen: Paths64): void {
       if (outrec.owner.pts !== null && this.checkBounds(outrec.owner) &&
         // Fast reject: a container must contain the child's bounds.
         this.containsRect(outrec.owner.bounds, outrec.bounds) &&
-        this.path1InsidePath2(outrec.pts!, outrec.owner.pts!)) break;
+        this.path1InsideOwner(outrec.pts!, outrec.owner)) break;
       outrec.owner = outrec.owner.owner;
     }
 
@@ -3303,7 +3505,7 @@ private checkSplitOwner(outrec: OutRec, splits: number[]): boolean {
 
       if (!this.checkBounds(split) ||
           !this.containsRect(split.bounds, outrec.bounds) ||
-          !this.path1InsidePath2(outrec.pts!, split.pts!)) continue;
+          !this.path1InsideOwner(outrec.pts!, split)) continue;
 
       if (!this.isValidOwner(outrec, split)) { // split is owned by outrec (#957)
         split.owner = outrec.owner;
