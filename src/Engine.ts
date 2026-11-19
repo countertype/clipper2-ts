@@ -753,9 +753,16 @@ export class ClipperBase {
     return pt1.x === pt2.x && pt1.y === pt2.y;
   }
 
-  private setZ(ae1: Active, ae2: Active, intersectPt: Point64): void {
+  private setZ(ae1: Active, ae2: Active, op: OutPt): void {
     const zCallback = this.zCallbackInternal;
     if (!zCallback) return;
+
+    // TS: an output point can be the very object of an input vertex (points are
+    // shared, not copied as in C++), so give it its own point before writing z.
+    // Otherwise the callback changes the caller's input and the z of edges
+    // still to be processed.
+    const intersectPt: Point64 = { x: op.pt.x, y: op.pt.y, z: 0 };
+    op.pt = intersectPt;
 
     // prioritize subject vertices over clip vertices
     // and pass the subject vertices before clip vertices in the callback
@@ -2647,7 +2654,7 @@ protected newOutRec(): OutRec {
       // toggle contribution ...
       if (ClipperBase.isHotEdge(ae1)) {
         resultOp = this.addOutPt(ae1, pt);
-        this.setZ(ae1, ae2, resultOp.pt);
+        this.setZ(ae1, ae2, resultOp);
         if (ClipperBase.isFront(ae1)) {
           ae1.outrec!.frontEdge = null;
         } else {
@@ -2676,7 +2683,7 @@ protected newOutRec(): OutRec {
       } else {
         resultOp = this.startOpenPath(ae1, pt);
       }
-      this.setZ(ae1, ae2, resultOp.pt);
+      this.setZ(ae1, ae2, resultOp);
       return;
     }
 
@@ -2744,21 +2751,21 @@ protected newOutRec(): OutRec {
       if ((oldE1WindCount !== 0 && oldE1WindCount !== 1) || (oldE2WindCount !== 0 && oldE2WindCount !== 1) ||
           (ae1.localMin!.polytype !== ae2.localMin!.polytype && this.cliptype !== ClipType.Xor)) {
         resultOp = this.addLocalMaxPoly(ae1, ae2, pt);
-        if (resultOp) this.setZ(ae1, ae2, resultOp.pt);
+        if (resultOp) this.setZ(ae1, ae2, resultOp);
       } else if (ClipperBase.isFront(ae1) || (ae1.outrec === ae2.outrec)) {
         // this 'else if' condition isn't strictly needed but
         // it's sensible to split polygons that only touch at
         // a common vertex (not at common edges).
         resultOp = this.addLocalMaxPoly(ae1, ae2, pt);
-        if (resultOp) this.setZ(ae1, ae2, resultOp.pt);
+        if (resultOp) this.setZ(ae1, ae2, resultOp);
         const op2 = this.addLocalMinPoly(ae1, ae2, pt);
-        this.setZ(ae1, ae2, op2.pt);
+        this.setZ(ae1, ae2, op2);
       } else {
         // can't treat as maxima & minima
         resultOp = this.addOutPt(ae1, pt);
-        this.setZ(ae1, ae2, resultOp.pt);
+        this.setZ(ae1, ae2, resultOp);
         const op2 = this.addOutPt(ae2, pt);
-        this.setZ(ae1, ae2, op2.pt);
+        this.setZ(ae1, ae2, op2);
         this.swapOutrecs(ae1, ae2);
       }
     }
@@ -2766,11 +2773,11 @@ protected newOutRec(): OutRec {
     // if one or other edge is 'hot' ...
     else if (ClipperBase.isHotEdge(ae1)) {
       resultOp = this.addOutPt(ae1, pt);
-      this.setZ(ae1, ae2, resultOp.pt);
+      this.setZ(ae1, ae2, resultOp);
       this.swapOutrecs(ae1, ae2);
     } else if (ClipperBase.isHotEdge(ae2)) {
       resultOp = this.addOutPt(ae2, pt);
-      this.setZ(ae1, ae2, resultOp.pt);
+      this.setZ(ae1, ae2, resultOp);
       this.swapOutrecs(ae1, ae2);
     }
 
@@ -2794,7 +2801,7 @@ protected newOutRec(): OutRec {
 
       if (!ClipperBase.isSamePolyType(ae1, ae2)) {
         resultOp = this.addLocalMinPoly(ae1, ae2, pt);
-        this.setZ(ae1, ae2, resultOp.pt);
+        this.setZ(ae1, ae2, resultOp);
       } else if (oldE1WindCount === 1 && oldE2WindCount === 1) {
         resultOp = null; 
         switch (this.cliptype) {
@@ -2819,7 +2826,7 @@ protected newOutRec(): OutRec {
             resultOp = this.addLocalMinPoly(ae1, ae2, pt);
             break;
         }
-        if (resultOp) this.setZ(ae1, ae2, resultOp.pt);
+        if (resultOp) this.setZ(ae1, ae2, resultOp);
       }
     }
   }

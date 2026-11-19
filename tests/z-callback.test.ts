@@ -342,6 +342,32 @@ describe('Z Callback in doSplitOp (issue #31)', () => {
     const splitCallbacks = callbackPoints.filter(p => p.z === 77);
     expect(splitCallbacks.length).toBeGreaterThan(0);
   });
+
+  it('a Z callback does not change the input points', () => {
+    // output points used to be the very objects of the input vertices, so writing z
+    // in the callback changed the caller's paths and the z later callbacks were given
+    const withZ = (arr: number[]): Point64[] => Clipper.makePath(arr).map(pt => ({ x: pt.x, y: pt.y, z: 7 }));
+    const subject: Paths64 = [withZ([-6,9, 12,-6, 5,19, 12,19]), withZ([13,4, -3,5, -11,-13])];
+    const clip: Paths64 = [withZ([-17,-16, -8,-5, 15,-1, 1,7, -20,-14, -15,0, 5,12]), withZ([-5,-10, -17,-5, -12,-1])];
+
+    const c64 = new Clipper64();
+    const seen: number[] = [];
+    c64.zCallback = (bot1, top1, bot2, top2, intersectPt) => {
+      seen.push(bot1.z!, top1.z!, bot2.z!, top2.z!);
+      intersectPt.z = 999;
+    };
+    c64.addSubject(subject);
+    c64.addClip(clip);
+    const solution: Paths64 = [];
+    c64.execute(ClipType.Difference, FillRule.NonZero, solution);
+
+    expect(solution.length).toBeGreaterThan(0);
+    expect(solution.flat().some(pt => pt.z === 999)).toBe(true);
+    for (const pt of [...subject, ...clip].flat()) expect(pt.z).toBe(7);
+    // the callback is only ever handed the z of the input edges, never one it set itself
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every(z => z === 7)).toBe(true);
+  });
 });
 
 
