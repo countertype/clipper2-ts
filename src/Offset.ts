@@ -43,7 +43,9 @@ class Group {
     const isJoined = (endType === EndType.Polygon) || (endType === EndType.Joined);
     this.inPaths = [];
     for (const path of paths) {
-      this.inPaths.push(ClipperOffset.stripDuplicates(path, isJoined));
+      const stripped = ClipperOffset.stripDuplicates(path, isJoined);
+      // the offset code assumes every path has at least one vertex
+      if (stripped.length > 0) this.inPaths.push(stripped);
     }
 
     if (endType === EndType.Polygon) {
@@ -90,7 +92,6 @@ export class ClipperOffset {
   private stepSin: number = 0;
   private stepCos: number = 0;
   private joinType: JoinType = JoinType.Bevel;
-  private endType: EndType = EndType.Polygon;
 
   public arcTolerance: number = 0;
   public mergeGroups: boolean = true;
@@ -153,14 +154,12 @@ export class ClipperOffset {
   }
 
   private checkPathsReversed(): boolean {
-    let result = false;
+    // nb: this assumes there's consistency in orientation between groups,
+    // and groups without a valid closed path have no orientation to offer
     for (const g of this.groupList) {
-      if (g.endType === EndType.Polygon) {
-        result = g.pathsReversed;
-        break;
-      }
+      if (g.lowestPathIdx >= 0) return g.pathsReversed;
     }
-    return result;
+    return false;
   }
 
   private executeInternal(delta: number): void {
@@ -288,27 +287,15 @@ export class ClipperOffset {
     return ClipperOffset.normalizeVector({ x: vec1.x + vec2.x, y: vec1.y + vec2.y });
   }
 
-  private static intersectPoint(pt1a: PointD, pt1b: PointD, pt2a: PointD, pt2b: PointD): PointD {
-    if (InternalClipper.isAlmostZero(pt1a.x - pt1b.x)) { // vertical
-      if (InternalClipper.isAlmostZero(pt2a.x - pt2b.x)) return { x: 0, y: 0 };
-      const m2 = (pt2b.y - pt2a.y) / (pt2b.x - pt2a.x);
-      const b2 = pt2a.y - m2 * pt2a.x;
-      return { x: pt1a.x, y: m2 * pt1a.x + b2 };
-    }
-
-    if (InternalClipper.isAlmostZero(pt2a.x - pt2b.x)) { // vertical
-      const m1 = (pt1b.y - pt1a.y) / (pt1b.x - pt1a.x);
-      const b1 = pt1a.y - m1 * pt1a.x;
-      return { x: pt2a.x, y: m1 * pt2a.x + b1 };
-    } else {
-      const m1 = (pt1b.y - pt1a.y) / (pt1b.x - pt1a.x);
-      const b1 = pt1a.y - m1 * pt1a.x;
-      const m2 = (pt2b.y - pt2a.y) / (pt2b.x - pt2a.x);
-      const b2 = pt2a.y - m2 * pt2a.x;
-      if (InternalClipper.isAlmostZero(m1 - m2)) return { x: 0, y: 0 };
-      const x = (b2 - b1) / (m1 - m2);
-      return { x: x, y: m1 * x + b1 };
-    }
+  // Intersection of the cap segment pt1..pt2 with the line through pt3 and pt4,
+  // clamped to the cap segment as in C++ (GetLineIntersectPt).
+  // The lines are only parallel for collinear edges, which offsetPoint
+  // sends to doMiter, so the ptQ fallback is a safeguard.
+  private static squareIntersect(pt1: PointD, pt2: PointD, pt3: PointD, pt4: PointD, ptQ: PointD): PointD {
+    const res = InternalClipper.getLineIntersectPtD(pt1, pt2, pt3, pt4);
+    const pt = res.success ? res.ip : { x: ptQ.x, y: ptQ.y };
+    pt.z = ptQ.z;
+    return pt;
   }
 
   private getPerpendic(pt: Point64, norm: PointD): Point64 {
@@ -386,15 +373,13 @@ export class ClipperOffset {
         x: pt3.x + vec.x * this.groupDelta,
         y: pt3.y + vec.y * this.groupDelta
       };
-      const pt = ClipperOffset.intersectPoint(pt1, pt2, pt3, pt4);
-      pt.z = ptQ.z;
+      const pt = ClipperOffset.squareIntersect(pt1, pt2, pt3, pt4, ptQ);
       //get the second intersect point through reflecion
       this.pathOut.push(Point64Utils.fromPointD(ClipperOffset.reflectPoint(pt, ptQ)));
       this.pathOut.push(Point64Utils.fromPointD(pt));
     } else {
       const pt4 = this.getPerpendicD(path[j], this.normals[k]);
-      const pt = ClipperOffset.intersectPoint(pt1, pt2, pt3, pt4);
-      pt.z = ptQ.z;
+      const pt = ClipperOffset.squareIntersect(pt1, pt2, pt3, pt4, ptQ);
       this.pathOut.push(Point64Utils.fromPointD(pt));
       //get the second intersect point through reflecion
       this.pathOut.push(Point64Utils.fromPointD(ClipperOffset.reflectPoint(pt, ptQ)));
@@ -410,18 +395,21 @@ export class ClipperOffset {
     });
   }
 
+  private setArcSteps(delta: number): void {
+    // calculate the number of steps required to approximate a circle
+    const absDelta = Math.abs(delta);
+    const arcTol = this.arcTolerance > 0.01 ? this.arcTolerance : absDelta * ClipperOffset.arc_const;
+    const stepsPer360 = Math.PI / Math.acos(1 - arcTol / absDelta);
+    this.stepSin = Math.sin((2 * Math.PI) / stepsPer360);
+    this.stepCos = Math.cos((2 * Math.PI) / stepsPer360);
+    if (delta < 0.0) this.stepSin = -this.stepSin;
+    this.stepsPerRad = stepsPer360 / (2 * Math.PI);
+  }
+
   private doRound(path: Path64, j: number, k: number, angle: number): void {
-    if (this.deltaCallback !== null) {
-      // when deltaCallback is assigned, groupDelta won't be constant,
-      // so we'll need to do the following calculations for *every* vertex.
-      const absDelta = Math.abs(this.groupDelta);
-      const arcTol = this.arcTolerance > 0.01 ? this.arcTolerance : absDelta * ClipperOffset.arc_const;
-      const stepsPer360 = Math.PI / Math.acos(1 - arcTol / absDelta);
-      this.stepSin = Math.sin((2 * Math.PI) / stepsPer360);
-      this.stepCos = Math.cos((2 * Math.PI) / stepsPer360);
-      if (this.groupDelta < 0.0) this.stepSin = -this.stepSin;
-      this.stepsPerRad = stepsPer360 / (2 * Math.PI);
-    }
+    // when deltaCallback is assigned, groupDelta won't be constant,
+    // so the arc steps need recalculating for *every* vertex.
+    if (this.deltaCallback !== null) this.setArcSteps(this.groupDelta);
 
     const pt = path[j];
     const ptz = (pt.z || 0);
@@ -536,7 +524,7 @@ export class ClipperOffset {
     this.offsetPolygon(group, reversePath);
   }
 
-  private offsetOpenPath(group: Group, path: Path64): void {
+  private offsetOpenPath(group: Group, path: Path64, endType: EndType): void {
     this.pathOut = [];
     const highI = path.length - 1;
 
@@ -548,7 +536,7 @@ export class ClipperOffset {
     if (Math.abs(this.groupDelta) < ClipperOffset.Tolerance) {
       this.pathOut.push(path[0]);
     } else {
-      switch (this.endType) {
+      switch (endType) {
         case EndType.Butt:
           this.doBevel(path, 0, 0);
           break;
@@ -581,7 +569,7 @@ export class ClipperOffset {
     if (Math.abs(this.groupDelta) < ClipperOffset.Tolerance) {
       this.pathOut.push(path[highI]);
     } else {
-      switch (this.endType) {
+      switch (endType) {
         case EndType.Butt:
           this.doBevel(path, highI, highI);
           break;
@@ -608,32 +596,24 @@ export class ClipperOffset {
     if (group.endType === EndType.Polygon) {
       // a straight path (2 points) can now also be 'polygon' offset 
       // where the ends will be treated as (180 deg.) joins
-      if (group.lowestPathIdx < 0) this.delta = Math.abs(this.delta);
-      this.groupDelta = group.pathsReversed ? -this.delta : this.delta;
+      // (the sign of this.delta is kept for the groups that follow)
+      const delta = group.lowestPathIdx >= 0 ? this.delta : Math.abs(this.delta);
+      this.groupDelta = group.pathsReversed ? -delta : delta;
     } else {
       this.groupDelta = Math.abs(this.delta);
     }
 
-    const absDelta = Math.abs(this.groupDelta);
-
     this.joinType = group.joinType;
-    this.endType = group.endType;
 
     if (group.joinType === JoinType.Round || group.endType === EndType.Round) {
-      const arcTol = this.arcTolerance > 0.01 ? this.arcTolerance : absDelta * ClipperOffset.arc_const;
-      const stepsPer360 = Math.PI / Math.acos(1 - arcTol / absDelta);
-      this.stepSin = Math.sin((2 * Math.PI) / stepsPer360);
-      this.stepCos = Math.cos((2 * Math.PI) / stepsPer360);
-      if (this.groupDelta < 0.0) this.stepSin = -this.stepSin;
-      this.stepsPerRad = stepsPer360 / (2 * Math.PI);
+      this.setArcSteps(this.groupDelta);
     }
 
     for (const pathIn of group.inPaths) {
       this.pathOut = [];
       const cnt = pathIn.length;
       if (cnt === 0) continue;
-      // nb: endType is changed below for 2 point joined paths
-      this.endType = group.endType;
+      this.buildNormals(pathIn);
 
       if (cnt === 1) {
         // single point
@@ -644,9 +624,12 @@ export class ClipperOffset {
           if (group.pathsReversed) this.groupDelta = -this.groupDelta;
         }
 
+        if (this.groupDelta < 1) continue;
         // single vertex so build a circle or square ...
         const ptz = (pt.z || 0);
-        if (group.endType === EndType.Round) {
+        if (group.joinType === JoinType.Round) {
+          // doRound may have left the arc steps of another path's delta
+          if (this.deltaCallback !== null) this.setArcSteps(this.groupDelta);
           const steps = Math.ceil(this.stepsPerRad * 2 * Math.PI);
           this.pathOut = ClipperOffset.ellipse(pt, Math.abs(this.groupDelta), Math.abs(this.groupDelta), steps);
           if (ptz !== 0) for (let i = 0; i < this.pathOut.length; i++) this.pathOut[i].z = ptz;
@@ -665,14 +648,15 @@ export class ClipperOffset {
         continue; // end of offsetting a single point
       }
 
-      if (cnt === 2 && group.endType === EndType.Joined) {
-        this.endType = (group.joinType === JoinType.Round) ?
+      // a 2 point joined path gets open path ends, for this path only
+      let endType = group.endType;
+      if (cnt === 2 && endType === EndType.Joined) {
+        endType = (group.joinType === JoinType.Round) ?
           EndType.Round :
           EndType.Square;
       }
 
-      this.buildNormals(pathIn);
-      switch (this.endType) {
+      switch (endType) {
         case EndType.Polygon:
           this.offsetPolygon(group, pathIn);
           break;
@@ -680,7 +664,7 @@ export class ClipperOffset {
           this.offsetOpenJoined(group, pathIn);
           break;
         default:
-          this.offsetOpenPath(group, pathIn);
+          this.offsetOpenPath(group, pathIn, endType);
           break;
       }
     }
@@ -699,7 +683,8 @@ export class ClipperOffset {
         result.push(lastPt);
       }
     }
-    if (isClosedPath && Point64Utils.equals(lastPt, result[0])) {
+    // (a single point is kept, as in C++)
+    if (isClosedPath && result.length > 1 && Point64Utils.equals(lastPt, result[0])) {
       result.pop();
     }
     return result;

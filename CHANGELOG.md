@@ -2,6 +2,27 @@
 
 All changes to this project will be documented in this file
 
+## [2.0.1-20]
+
+### Fixed
+
+- `Offset`: square joins and miter joins past the miter limit compute the corner with `InternalClipper.getLineIntersectPtD` instead of a slope-intercept helper, as C++ does. The crossing is now clamped to the cap segment, so a narrow notch no longer extends past `delta`, and corners far from the origin no longer lose precision ([#44](https://github.com/countertype/clipper2-ts/issues/44))
+- `Core`: `getLineIntersectPt` rounds the intersection point instead of truncating it toward zero, and evaluates each segment from its bottom end so a shared edge rounds to the same point whichever way round it is given (PolyClipping/Clipper2 [f774daf1](https://github.com/PolyClipping/Clipper2/commit/f774daf1), [#13](https://github.com/PolyClipping/Clipper2/issues/13)). Truncation could push a point off its segment and reverse a contour: `difference` of two small triangles returned an area of -3.5 where the exact answer is 3.27. This also fixes the self-intersecting ring in upstream [#1083](https://github.com/AngusJohnson/Clipper2/issues/1083), which is no longer a known failure
+- `Engine`: `updateEdgeIntoAEL` puts edges leaving a shared vertex in order by direction. Edges within rounding of each other tied on `topX`, their crossing showed up scanbeams later, and the region between them came out reversed (PolyClipping/Clipper2 [ec5f2d4c](https://github.com/PolyClipping/Clipper2/commit/ec5f2d4c), [#13](https://github.com/PolyClipping/Clipper2/issues/13))
+- `Engine`: `addNewIntersectNode` moves an intersection that falls outside the scanbeam onto the part of the flatter edge that lies inside the scanbeam, not onto the whole edge (PolyClipping/Clipper2 [4a3bf641](https://github.com/PolyClipping/Clipper2/commit/4a3bf641))
+- `Offset`: a polygon group without a closed path no longer makes delta positive for the groups after it, which grew them when they should have shrunk (PolyClipping/Clipper2 [6c7d0830](https://github.com/PolyClipping/Clipper2/commit/6c7d0830))
+- `Offset`: `deltaCallback` gets the normals of the single point path it is called for, and a round single point gets arc steps for its own delta, not those left by an earlier path (PolyClipping/Clipper2 [6c7d0830](https://github.com/PolyClipping/Clipper2/commit/6c7d0830))
+- `Offset`: only a group with a closed path decides the orientation of the solution. An empty group, or one holding only a line, ahead of a clockwise polygon emptied the result (PolyClipping/Clipper2 [ca30bebd](https://github.com/PolyClipping/Clipper2/commit/ca30bebd), [#9](https://github.com/PolyClipping/Clipper2/issues/9)). Empty paths are dropped when a group is created
+- `Offset`: a single point in a `Polygon` or `Joined` group is offset to a square or circle, as it is for the other end types and in C++. `stripDuplicates` removed it as a duplicate of itself. A single point is skipped when its delta is below 1, as in C++
+
+### Changed
+
+- Clipping output can differ from 2.0.1-19 by one unit at intersection points, because they are now rounded. On 20,000 random clipping cases the share of results identical to PolyClipping/Clipper2 C++ went from about 22% to 84% for coordinates within ±12 and to 96-100% for larger ones; on 12,000 random offset cases it went from about 9% to 98%
+- `Offset`: the join type alone decides whether a single point becomes a circle or a square, as in C++. A single point with a round end type and a join type other than round used to be a circle and is now a square
+- `Offset`: a closed path whose points are all identical now collapses to a single point and is offset as one; it used to return nothing
+- `tests/union-pocket.test.ts`: the two inputs for [#35](https://github.com/countertype/clipper2-ts/pull/35) only formed a hole because of truncation. They now return one outline, as C++ does, and a new three-triangle input covers the kept hole
+- `tests/intersection-rounding.test.ts` and `tests/offsets.test.ts` add the upstream regression tests for the commits above
+
 ## [2.0.1-19]
 
 ### Fixed

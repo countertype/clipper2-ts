@@ -410,9 +410,19 @@ function checkCastInt64(val: number): number {
 // won't be inside seg2, even when it hasn't been constrained (ie inside seg1).
 // Returns Point64 | null to avoid allocating a wrapper object on every call.
 function getLineIntersectPt(
-  ln1a: Point64, ln1b: Point64, 
-  ln2a: Point64, ln2b: Point64
+  seg1a: Point64, seg1b: Point64,
+  seg2a: Point64, seg2b: Point64
 ): Point64 | null {
+  // segments are evaluated from their bottom end, as the sweep does, so that
+  // a shared edge rounds to the same point whichever way round it is given
+  let ln1a = seg1a, ln1b = seg1b, ln2a = seg2a, ln2b = seg2b;
+  if (seg1b.y > seg1a.y || (seg1b.y === seg1a.y && seg1b.x < seg1a.x)) {
+    ln1a = seg1b; ln1b = seg1a;
+  }
+  if (seg2b.y > seg2a.y || (seg2b.y === seg2a.y && seg2b.x < seg2a.x)) {
+    ln2a = seg2b; ln2b = seg2a;
+  }
+
   const dy1 = (ln1b.y - ln1a.y);
   const dx1 = (ln1b.x - ln1a.x);
   const dy2 = (ln2b.y - ln2a.y);
@@ -436,11 +446,11 @@ function getLineIntersectPt(
   } else if (t >= 1.0) {
     return { x: ln1b.x, y: ln1b.y, z: (ln1b.z || 0) };
   } else {
-    // avoid using constructor (and rounding too) as they affect performance
-    // Use Math.trunc to match C# (long) cast behavior which truncates towards zero
+    // rounding rather than truncating toward zero keeps 'ip' within half a unit
+    // of the crossing; truncating could push it off its segment
     return {
-      x: Math.trunc(ln1a.x + t * dx1),
-      y: Math.trunc(ln1a.y + t * dy1),
+      x: roundToEven(ln1a.x + t * dx1),
+      y: roundToEven(ln1a.y + t * dy1),
       z: 0
     };
   }

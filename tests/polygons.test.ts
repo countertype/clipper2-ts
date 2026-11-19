@@ -51,7 +51,7 @@ describe('Comprehensive Polygon Clipping Tests', () => {
         } else if (isInList(testNum, [23, 24, 37, 43, 45, 87, 102, 111, 118, 119])) {
           expect(countDiff).toBeLessThanOrEqual(1);
         } else if (testNum === 16) {
-          // Test 16: C# reference also fails (bow-tie polygon edge case)
+          // Test 16: two thin triangles; C++ also allows a count tolerance here
           expect(countDiff).toBeLessThanOrEqual(1);
         } else {
           // Most tests match exactly (including Test 168 after our fix!)

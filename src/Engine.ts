@@ -1839,6 +1839,27 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     }
     this.insertScanline(ae.top.y);
 
+    // rounded TopX values can hide a wrong order between edges leaving a shared
+    // vertex, so restore their order here rather than crossing them further on
+    const bot = ae.bot;
+    let prev = ae.prevInAEL;
+    while (prev !== null && prev.bot.x === bot.x && prev.bot.y === bot.y &&
+      !ClipperBase.isHorizontal(prev) &&
+      InternalClipper.crossProductSign(prev.top, bot, ae.top) > 0) {
+      this.intersectEdges(prev, ae, bot);
+      this.swapPositionsInAEL(prev, ae);
+      prev = ae.prevInAEL;
+    }
+
+    let next = ae.nextInAEL;
+    while (next !== null && next.bot.x === bot.x && next.bot.y === bot.y &&
+      !ClipperBase.isHorizontal(next) &&
+      InternalClipper.crossProductSign(next.top, bot, ae.top) < 0) {
+      this.intersectEdges(ae, next, bot);
+      this.swapPositionsInAEL(ae, next);
+      next = ae.nextInAEL;
+    }
+
     this.checkJoinLeft(ae, ae.bot);
     this.checkJoinRight(ae, ae.bot, true); // (#500)
   }
@@ -1880,16 +1901,17 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       const absDx1 = Math.abs(ae1.dx);
       const absDx2 = Math.abs(ae2.dx);
       
-      if (absDx1 > 100 && absDx2 > 100) {
-        if (absDx1 > absDx2) {
-          ip = InternalClipper.getClosestPtOnSegment(ip, ae1.bot, ae1.top);
-        } else {
-          ip = InternalClipper.getClosestPtOnSegment(ip, ae2.bot, ae2.top);
-        }
-      } else if (absDx1 > 100) {
-        ip = InternalClipper.getClosestPtOnSegment(ip, ae1.bot, ae1.top);
-      } else if (absDx2 > 100) {
-        ip = InternalClipper.getClosestPtOnSegment(ip, ae2.bot, ae2.top);
+      if (absDx1 > 100 || absDx2 > 100) {
+        // move onto the flatter edge, using only its part inside the scanbeam since
+        // near parallel edges can meet far beyond it
+        const ae = (absDx1 > absDx2) ? ae1 : ae2;
+        const botY = this.currentBotY;
+        ip = InternalClipper.getClosestPtOnSegment(ip,
+          { x: ClipperBase.topX(ae, botY), y: botY },
+          { x: ClipperBase.topX(ae, topY), y: topY });
+        // the projection is rounded in double, which can overshoot with huge coordinates
+        if (ip.y < topY) ip.y = topY;
+        else if (ip.y > botY) ip.y = botY;
       } else {
         if (ip.y < topY) ip.y = topY;
         else ip.y = this.currentBotY;
