@@ -210,8 +210,9 @@ function compareHorzSegments(hs1: HorzSegment, hs2: HorzSegment): number {
 function compareIntersectNodes(a: IntersectNode, b: IntersectNode): number {
   if (a.pt.y !== b.pt.y) return (a.pt.y > b.pt.y) ? -1 : 1;
   if (a.pt.x !== b.pt.x) return (a.pt.x < b.pt.x) ? -1 : 1;
-  if (a.edge1.curX !== b.edge1.curX) return (a.edge1.curX < b.edge1.curX) ? -1 : 1;
-  return (a.edge2.curX < b.edge2.curX) ? -1 : (a.edge2.curX > b.edge2.curX) ? 1 : 0;
+  // intersections at the same point keep the order they were found in, as in C++
+  // (Array.prototype.sort is stable); their order changes the output
+  return 0;
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -679,8 +680,10 @@ private static topX(ae: Active, currentY: number): number {
   if ((currentY === ae.top.y) || (ae.top.x === ae.bot.x)) return ae.top.x;
   if (currentY === ae.bot.y) return ae.bot.x;
 
-  // use MidpointRounding.ToEven in order to explicitly match the nearbyint behaviour on the C++ side
-  return InternalClipper.roundToEven(ae.bot.x + ae.dx * (currentY - ae.bot.y));
+  // use MidpointRounding.ToEven in order to explicitly match the nearbyint behaviour on the C++ side.
+  // The offset is rounded and then added to bot.x, as in C++ and C#: rounding the sum
+  // resolves an exact half differently when bot.x is odd
+  return ae.bot.x + InternalClipper.roundToEven(ae.dx * (currentY - ae.bot.y));
 }
 
   private static isHorizontal(ae: Active): boolean {
@@ -773,7 +776,9 @@ private static topX(ae: Active, currentY: number): number {
 
   protected reset(): void {
     if (!this.isSortedMinimaList) {
-      this.minimaList.sort((a, b) => b.vertex.pt.y - a.vertex.pt.y);
+      // by descending y, then ascending x as in C++ (#594)
+      this.minimaList.sort((a, b) =>
+        (b.vertex.pt.y - a.vertex.pt.y) || (a.vertex.pt.x - b.vertex.pt.x));
       this.isSortedMinimaList = true;
     }
 
@@ -2330,7 +2335,7 @@ protected newOutRec(): OutRec {
       ((ae.bot.y > pt.y) || (prev.bot.y > pt.y))) return;  // (#490)
 
     if (checkCurrX) {
-      if (this.perpendicDistFromLineSqrdGreaterThanQuarter(pt, prev.bot, prev.top)) return;
+      if (this.perpendicDistFromLineSqrdGreaterThan(pt, prev.bot, prev.top, 1, 4)) return; // > 0.25
     }
     if (!InternalClipper.isCollinear(ae.top, pt, prev.top)) return;
 
@@ -2356,7 +2361,8 @@ protected newOutRec(): OutRec {
       ((ae.bot.y > pt.y) || (next.bot.y > pt.y)))  return; // (#490)
 
     if (checkCurrX) {
-      if (this.perpendicDistFromLineSqrdGreaterThanQuarter(pt, next.bot, next.top)) return;
+      // nb: C++ tests 0.35 here and 0.25 in checkJoinLeft (C# tested 0.25 in both)
+      if (this.perpendicDistFromLineSqrdGreaterThan(pt, next.bot, next.top, 7, 20)) return; // > 0.35
     }
     if (!InternalClipper.isCollinear(ae.top, pt, next.top)) return;
 
@@ -2371,9 +2377,11 @@ protected newOutRec(): OutRec {
     next.joinWith = JoinWith.Left;
   }
 
-  private perpendicDistFromLineSqrdGreaterThanQuarter(
-    pt: Point64, line1: Point64, line2: Point64
+  // true when the squared distance of pt from the line exceeds limitNum / limitDen
+  private perpendicDistFromLineSqrdGreaterThan(
+    pt: Point64, line1: Point64, line2: Point64, limitNum: number, limitDen: number
   ): boolean {
+    const limit = limitNum / limitDen;
     const a = pt.x - line1.x;
     const b = pt.y - line1.y;
     const c = line2.x - line1.x;
@@ -2384,7 +2392,7 @@ protected newOutRec(): OutRec {
     if (Math.abs(a) < maxCoord && Math.abs(b) < maxCoord &&
         Math.abs(c) < maxCoord && Math.abs(d) < maxCoord) {
       const cross = (a * d) - (c * b);
-      return (cross * cross) / ((c * c) + (d * d)) > 0.25;
+      return (cross * cross) / ((c * c) + (d * d)) > limit;
     }
     // Large coordinates: use BigInt for precision
     if (Number.isSafeInteger(a) && Number.isSafeInteger(b) &&
@@ -2392,11 +2400,11 @@ protected newOutRec(): OutRec {
       const cross = (BigInt(a) * BigInt(d)) - (BigInt(c) * BigInt(b));
       const crossSq = cross * cross;
       const denom = (BigInt(c) * BigInt(c)) + (BigInt(d) * BigInt(d));
-      return B4 * crossSq > denom;
+      return BigInt(limitDen) * crossSq > BigInt(limitNum) * denom;
     }
     // Fallback for non-integer coords
     const cross = (a * d) - (c * b);
-    return (cross * cross) / ((c * c) + (d * d)) > 0.25;
+    return (cross * cross) / ((c * c) + (d * d)) > limit;
   }
 
 
@@ -3141,7 +3149,7 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
   // dropped. But when it lies inside the remainder it is a hole the remainder
   // already covers (the loop's -1 cancels the remainder's +1): dropping it
   // fills that hole. Keep such a loop as its own (hole) path.
-  if (!(absDoubleArea2 > B2)) return; // area > 1
+  if (absDoubleArea2 < B2) return; // area >= 1, as in C++
   const isHoleOfRemainder = !(absDoubleArea2 > absDoubleArea1) &&
     ((doubleArea2 > B0) !== (doubleArea1 > B0));
   if (isHoleOfRemainder &&

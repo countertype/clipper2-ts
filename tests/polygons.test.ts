@@ -35,26 +35,25 @@ describe('Comprehensive Polygon Clipping Tests', () => {
       const measuredArea = Math.round(Clipper.areaPaths(solution)); // C#: (long)Clipper.Area(solution)
       const countDiff = testCase.expectedCount > 0 ? Math.abs(testCase.expectedCount - measuredCount) : 0;
       const areaDiff = testCase.expectedArea > 0 ? Math.abs(testCase.expectedArea - measuredArea) : 0;
-      const areaDiffRatio = testCase.expectedArea <= 0 ? 0 : areaDiff / testCase.expectedArea;
+      // as in C++, the area tolerance is a share of the measured area
+      const areaDiffRatio = testCase.expectedArea <= 0 || measuredArea === 0 ? areaDiff : areaDiff / Math.abs(measuredArea);
 
-      // Validate count - C#-calibrated tolerances
-      // These tolerances reflect that C# also has small differences from test file expected values
+      // The tolerances below are those of the C++ reference (CPP/Tests/TestPolygons.cpp in
+      // PolyClipping/Clipper2). The stored counts and areas in Polygons.txt are not what the
+      // reference itself produces for every test, so it needs them too. Do not loosen them
+      // for this port: its output is identical to the reference on all but a few of these tests.
       if (testCase.expectedCount > 0) {
-        if (isInList(testNum, [172])) {
-          expect(countDiff).toBeLessThanOrEqual(17);  // Complex self-intersecting geometry
-        } else if (isInList(testNum, [140, 150, 165, 166, 173, 176, 177, 179])) {
-          expect(countDiff).toBeLessThanOrEqual(9);
-        } else if (testNum >= 120) {
-          expect(countDiff).toBeLessThanOrEqual(7);  // High-complexity range
-        } else if (isInList(testNum, [27, 121, 126])) {
+        if (isInList(testNum, [120, 121, 130, 138, 140, 148, 163, 165, 166, 167, 168, 172, 173, 175, 178, 180])) {
+          expect(countDiff).toBeLessThanOrEqual(5);
+        } else if (testNum === 126) {
+          expect(countDiff).toBeLessThanOrEqual(3);
+        } else if (isInList(testNum, [16, 27, 181])) {
           expect(countDiff).toBeLessThanOrEqual(2);
-        } else if (isInList(testNum, [23, 24, 37, 43, 45, 87, 102, 111, 118, 119])) {
-          expect(countDiff).toBeLessThanOrEqual(1);
-        } else if (testNum === 16) {
-          // Test 16: two thin triangles; C++ also allows a count tolerance here
+        } else if (testNum >= 120 && testNum <= 184) {
+          expect(countDiff).toBeLessThanOrEqual(2);
+        } else if (isInList(testNum, [23, 45, 87, 102, 111, 113, 191])) {
           expect(countDiff).toBeLessThanOrEqual(1);
         } else {
-          // Most tests match exactly (including Test 168 after our fix!)
           if (countDiff !== 0) {
             console.log(`\nTest ${testNum} FAILED: expected ${testCase.expectedCount}, got ${measuredCount}, diff ${countDiff}`);
             console.log(`  ClipType: ${ClipType[testCase.clipType]}, FillRule: ${FillRule[testCase.fillRule]}`);
@@ -63,22 +62,19 @@ describe('Comprehensive Polygon Clipping Tests', () => {
         }
       }
 
-      // Area validation - C#-calibrated tolerances
       if (testCase.expectedArea > 0) {
         if (isInList(testNum, [19, 22, 23, 24])) {
           expect(areaDiffRatio).toBeLessThanOrEqual(0.5);
         } else if (testNum === 193) {
-          expect(areaDiffRatio).toBeLessThanOrEqual(0.25);
+          expect(areaDiffRatio).toBeLessThanOrEqual(0.2);
         } else if (testNum === 63) {
           expect(areaDiffRatio).toBeLessThanOrEqual(0.1);
         } else if (testNum === 16) {
           expect(areaDiffRatio).toBeLessThanOrEqual(0.075);
-        } else if (isInList(testNum, [15, 26])) {
+        } else if (testNum === 26) {
           expect(areaDiffRatio).toBeLessThanOrEqual(0.05);
-        } else if (isInList(testNum, [52, 53, 54, 59, 60, 64, 117, 118, 119, 184])) {
+        } else if (isInList(testNum, [15, 52, 53, 54, 59, 60, 64, 66, 117, 119, 184])) {
           expect(areaDiffRatio).toBeLessThanOrEqual(0.02);
-        } else if (testNum === 172) {
-          expect(areaDiffRatio).toBeLessThanOrEqual(0.05);  // Complex self-intersecting geometry
         } else {
           expect(areaDiffRatio).toBeLessThanOrEqual(0.01);
         }

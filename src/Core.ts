@@ -546,9 +546,9 @@ function getClosestPtOnSegment(offPt: Point64, seg1: Point64, seg2: Point64): Po
   const qClamped = q < 0 ? 0 : (q > 1 ? 1 : q);
   
   return {
-    // use Math.round to match the C# MidpointRounding.ToEven behavior
-    x: Math.round(seg1.x + qClamped * dx),
-    y: Math.round(seg1.y + qClamped * dy),
+    // the offset is rounded half to even and then added, as in C++
+    x: seg1.x + roundToEven(qClamped * dx),
+    y: seg1.y + roundToEven(qClamped * dy),
     z: 0
   };
 }
