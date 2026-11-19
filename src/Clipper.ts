@@ -347,8 +347,8 @@ export function offsetPath(path: Path64, dx: number, dy: number): Path64 {
 
 export function scalePoint64(pt: Point64, scale: number): Point64 {
   return {
-    x: Math.round(pt.x * scale),
-    y: Math.round(pt.y * scale)
+    x: InternalClipper.roundAwayFromZero(pt.x * scale),
+    y: InternalClipper.roundAwayFromZero(pt.y * scale)
   };
 }
 
@@ -366,10 +366,10 @@ export function scaleRect(rec: RectD, scale: number): Rect64 {
   InternalClipper.checkSafeScaleValue(rec.right, maxAbs, "scaleRect");
   InternalClipper.checkSafeScaleValue(rec.bottom, maxAbs, "scaleRect");
   return {
-    left: Math.round(rec.left * scale),
-    top: Math.round(rec.top * scale),
-    right: Math.round(rec.right * scale),
-    bottom: Math.round(rec.bottom * scale)
+    left: InternalClipper.roundAwayFromZero(rec.left * scale),
+    top: InternalClipper.roundAwayFromZero(rec.top * scale),
+    right: InternalClipper.roundAwayFromZero(rec.right * scale),
+    bottom: InternalClipper.roundAwayFromZero(rec.bottom * scale)
   };
 }
 
@@ -378,8 +378,8 @@ export function scalePath(path: Path64, scale: number): Path64 {
   const result: Path64 = [];
   for (const pt of path) {
     result.push({
-      x: Math.round(pt.x * scale),
-      y: Math.round(pt.y * scale)
+      x: InternalClipper.roundAwayFromZero(pt.x * scale),
+      y: InternalClipper.roundAwayFromZero(pt.y * scale)
     });
   }
   return result;
@@ -420,8 +420,8 @@ export function scalePath64(path: PathD, scale: number): Path64 {
     InternalClipper.checkSafeScaleValue(pt.x, maxAbs, "scalePath64");
     InternalClipper.checkSafeScaleValue(pt.y, maxAbs, "scalePath64");
     result.push({
-      x: Math.round(pt.x * scale),
-      y: Math.round(pt.y * scale)
+      x: InternalClipper.roundAwayFromZero(pt.x * scale),
+      y: InternalClipper.roundAwayFromZero(pt.y * scale)
     });
   }
   return result;
@@ -1105,12 +1105,12 @@ export function ellipse(center: Point64, radiusX: number, radiusY: number = 0, s
   const co = Math.cos(2 * Math.PI / steps);
   let dx = co;
   let dy = si;
-  const result: Path64 = [{ x: Math.round(center.x + radiusX), y: center.y }];
+  const result: Path64 = [{ x: InternalClipper.roundAwayFromZero(center.x + radiusX), y: center.y }];
   
   for (let i = 1; i < steps; ++i) {
     result.push({
-      x: Math.round(center.x + radiusX * dx),
-      y: Math.round(center.y + radiusY * dy)
+      x: InternalClipper.roundAwayFromZero(center.x + radiusX * dx),
+      y: InternalClipper.roundAwayFromZero(center.y + radiusY * dy)
     });
     const x = dx * co - dy * si;
     dy = dy * co + dx * si;

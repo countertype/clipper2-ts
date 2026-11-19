@@ -275,6 +275,7 @@ export const ClipperEngine = {
       // nb: vertexList holds only each path's head vertex; the rest of the
       // chain stays reachable through the next/prev links
       let prevPt: Point64 | null = null;
+      let cnt = 0;
       for (let j = 0, len2 = path.length; j < len2; j++) {
         const pt = path[j];
         if (v0 === null) {
@@ -282,19 +283,23 @@ export const ClipperEngine = {
           vertexList.push(v0);
           prevV = v0;
           prevPt = pt;
+          cnt++;
         } else if (!(prevPt!.x === pt.x && prevPt!.y === pt.y)) { // ie skips duplicates
           const currV: Vertex = new Vertex(pt, VertexFlags.None, prevV);
           prevV!.next = currV;
           prevV = currV;
           prevPt = pt;
+          cnt++;
         }
       }
-      
+
       if (prevV?.prev == null) continue;
       if (!isOpen && prevV!.pt.x === v0!.pt.x && prevV!.pt.y === v0!.pt.y) prevV = prevV!.prev;
       prevV!.next = v0;
       v0!.prev = prevV;
-      if (!isOpen && prevV!.next === prevV) continue;
+      // a closed path needs 3 vertices, as in C++ (C# let a 2 vertex path through, and
+      // crossing other paths it added area to the solution)
+      if (!isOpen && (cnt === 2 || prevV!.next === prevV)) continue;
 
       // OK, we have a valid path
       let goingUp: boolean;
@@ -3584,8 +3589,8 @@ export const Clipper = {
       InternalClipper.checkSafeScaleValue(pt.x, maxAbs, "scalePath64");
       InternalClipper.checkSafeScaleValue(pt.y, maxAbs, "scalePath64");
       result.push({
-        x: Math.round(pt.x * scale),
-        y: Math.round(pt.y * scale)
+        x: InternalClipper.roundAwayFromZero(pt.x * scale),
+        y: InternalClipper.roundAwayFromZero(pt.y * scale)
       });
     }
     return result;

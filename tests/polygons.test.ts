@@ -246,4 +246,35 @@ describe('Comprehensive Polygon Clipping Tests', () => {
       }
     }
   });
+
+  test('a closed path with only two distinct points is ignored, as in C++', () => {
+    const square = Clipper.makePath([0,0, 100,0, 100,100, 0,100]);
+    // the line crosses the square; it used to be swept as a polygon and left
+    // extra vertices on the square, or added area between other paths
+    const line = Clipper.makePath([-50,50, 150,60]);
+    const solution = Clipper.union([square, line], FillRule.NonZero);
+    expect(solution).toHaveLength(1);
+    expect(solution[0]).toHaveLength(4);
+    expect(Clipper.areaPaths(solution)).toBe(10000);
+
+    const paths: Paths64 = [
+      Clipper.makePath([-1,165, -634,-1693, -1525,1702, -85,158]),
+      Clipper.makePath([685,-1982, 1794,-1467, 1668,-722, -1864,1681, -1001,1122, 553,-730]),
+      Clipper.makePath([-689,1065, -419,-1055])
+    ];
+    expect(Clipper.areaPaths(Clipper.union(paths, FillRule.Positive))).toBe(2072202.5);
+    expect(Clipper.areaPaths(Clipper.union(paths.slice(0, 2), FillRule.Positive))).toBe(2072202.5);
+  });
+
+  test('intersection points are never -0', () => {
+    const solution = Clipper.intersect(
+      [Clipper.makePath([-10,-3, 10,4, 10,-10])],
+      [Clipper.makePath([-10,3, 10,-4, 10,10])], FillRule.NonZero);
+    for (const path of solution) {
+      for (const pt of path) {
+        expect(Object.is(pt.x, -0)).toBe(false);
+        expect(Object.is(pt.y, -0)).toBe(false);
+      }
+    }
+  });
 });

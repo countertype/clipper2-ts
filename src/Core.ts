@@ -400,6 +400,14 @@ function roundToEven(value: number): number {
   return r;
 }
 
+// Rounds half away from zero, as std::round in C++ and MidpointRounding.AwayFromZero
+// in C# do when a floating point coordinate becomes an integer one. Math.round rounds
+// a negative half up (-2.5 to -2), which shifts results at negative coordinates, and
+// returns -0 for values between -0.5 and 0.
+function roundAwayFromZero(value: number): number {
+  return value < 0 ? (-Math.round(-value) || 0) : Math.round(value);
+}
+
 function checkCastInt64(val: number): number {
   if ((val >= IC_MaxCoord) || (val <= -IC_MaxCoord)) return IC_Invalid64;
   return Math.round(val);
@@ -448,9 +456,10 @@ function getLineIntersectPt(
   } else {
     // rounding rather than truncating toward zero keeps 'ip' within half a unit
     // of the crossing; truncating could push it off its segment
+    // (Math.round gives -0 for values from -0.5 to -0; adding 0 makes that 0)
     return {
-      x: roundToEven(ln1a.x + t * dx1),
-      y: roundToEven(ln1a.y + t * dy1),
+      x: roundToEven(ln1a.x + t * dx1) + 0,
+      y: roundToEven(ln1a.y + t * dy1) + 0,
       z: 0
     };
   }
@@ -684,6 +693,7 @@ export const InternalClipper = {
   crossProductD,
   dotProductD,
   roundToEven,
+  roundAwayFromZero,
   checkCastInt64,
   getLineIntersectPt,
   getLineIntersectPtD,
@@ -704,19 +714,19 @@ export namespace InternalClipper {
 // Point64 utility functions (plain object, avoids namespace IIFE)
 export const Point64Utils = {
   create(x: number = 0, y: number = 0, z: number = 0): Point64 {
-    return { x: Math.round(x), y: Math.round(y), z };
+    return { x: roundAwayFromZero(x), y: roundAwayFromZero(y), z };
   },
 
   fromPointD(pt: PointD): Point64 {
     InternalClipper.ensureSafeInteger(pt.x, "Point64Utils.fromPointD");
     InternalClipper.ensureSafeInteger(pt.y, "Point64Utils.fromPointD");
-    return { x: Math.round(pt.x), y: Math.round(pt.y), z: pt.z || 0 };
+    return { x: roundAwayFromZero(pt.x), y: roundAwayFromZero(pt.y), z: pt.z || 0 };
   },
 
   scale(pt: Point64, scale: number): Point64 {
     return {
-      x: Math.round(pt.x * scale),
-      y: Math.round(pt.y * scale),
+      x: roundAwayFromZero(pt.x * scale),
+      y: roundAwayFromZero(pt.y * scale),
       z: pt.z || 0
     };
   },

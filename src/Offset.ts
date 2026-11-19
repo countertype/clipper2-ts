@@ -748,8 +748,8 @@ export class ClipperOffset {
 
   private getPerpendic(pt: Point64, norm: PointD): Point64 {
     return {
-      x: Math.round(pt.x + norm.x * this.groupDelta),
-      y: Math.round(pt.y + norm.y * this.groupDelta),
+      x: InternalClipper.roundAwayFromZero(pt.x + norm.x * this.groupDelta),
+      y: InternalClipper.roundAwayFromZero(pt.y + norm.y * this.groupDelta),
       z: (pt.z || 0)
     };
   }
@@ -768,24 +768,24 @@ export class ClipperOffset {
     if (j === k) {
       const absDelta = Math.abs(this.groupDelta);
       pt1 = {
-        x: Math.round(path[j].x - absDelta * this.normals[j].x),
-        y: Math.round(path[j].y - absDelta * this.normals[j].y),
+        x: InternalClipper.roundAwayFromZero(path[j].x - absDelta * this.normals[j].x),
+        y: InternalClipper.roundAwayFromZero(path[j].y - absDelta * this.normals[j].y),
         z: pjz
       };
       pt2 = {
-        x: Math.round(path[j].x + absDelta * this.normals[j].x),
-        y: Math.round(path[j].y + absDelta * this.normals[j].y),
+        x: InternalClipper.roundAwayFromZero(path[j].x + absDelta * this.normals[j].x),
+        y: InternalClipper.roundAwayFromZero(path[j].y + absDelta * this.normals[j].y),
         z: pjz
       };
     } else {
       pt1 = {
-        x: Math.round(path[j].x + this.groupDelta * this.normals[k].x),
-        y: Math.round(path[j].y + this.groupDelta * this.normals[k].y),
+        x: InternalClipper.roundAwayFromZero(path[j].x + this.groupDelta * this.normals[k].x),
+        y: InternalClipper.roundAwayFromZero(path[j].y + this.groupDelta * this.normals[k].y),
         z: pjz
       };
       pt2 = {
-        x: Math.round(path[j].x + this.groupDelta * this.normals[j].x),
-        y: Math.round(path[j].y + this.groupDelta * this.normals[j].y),
+        x: InternalClipper.roundAwayFromZero(path[j].x + this.groupDelta * this.normals[j].x),
+        y: InternalClipper.roundAwayFromZero(path[j].y + this.groupDelta * this.normals[j].y),
         z: pjz
       };
     }
@@ -837,8 +837,8 @@ export class ClipperOffset {
   private doMiter(path: Path64, j: number, k: number, cosA: number): void {
     const q = this.groupDelta / (cosA + 1);
     this.pathOut.push({
-      x: Math.round(path[j].x + (this.normals[k].x + this.normals[j].x) * q),
-      y: Math.round(path[j].y + (this.normals[k].y + this.normals[j].y) * q),
+      x: InternalClipper.roundAwayFromZero(path[j].x + (this.normals[k].x + this.normals[j].x) * q),
+      y: InternalClipper.roundAwayFromZero(path[j].y + (this.normals[k].y + this.normals[j].y) * q),
       z: (path[j].z || 0)
     });
   }
@@ -871,8 +871,8 @@ export class ClipperOffset {
     if (j === k) PointDUtils.negate(offsetVec);
     
     this.pathOut.push({
-      x: Math.round(pt.x + offsetVec.x),
-      y: Math.round(pt.y + offsetVec.y),
+      x: InternalClipper.roundAwayFromZero(pt.x + offsetVec.x),
+      y: InternalClipper.roundAwayFromZero(pt.y + offsetVec.y),
       z: ptz
     });
     
@@ -883,8 +883,8 @@ export class ClipperOffset {
         y: offsetVec.x * this.stepSin + offsetVec.y * this.stepCos
       };
       this.pathOut.push({
-        x: Math.round(pt.x + offsetVec.x),
-        y: Math.round(pt.y + offsetVec.y),
+        x: InternalClipper.roundAwayFromZero(pt.x + offsetVec.x),
+        y: InternalClipper.roundAwayFromZero(pt.y + offsetVec.y),
         z: ptz
       });
     }
@@ -1180,12 +1180,12 @@ export class ClipperOffset {
     const co = Math.cos(2 * Math.PI / steps);
     let dx = co;
     let dy = si;
-    const result: Path64 = [{ x: Math.round(center.x + radiusX), y: center.y }];
+    const result: Path64 = [{ x: InternalClipper.roundAwayFromZero(center.x + radiusX), y: center.y }];
     
     for (let i = 1; i < steps; ++i) {
       result.push({
-        x: Math.round(center.x + radiusX * dx),
-        y: Math.round(center.y + radiusY * dy)
+        x: InternalClipper.roundAwayFromZero(center.x + radiusX * dx),
+        y: InternalClipper.roundAwayFromZero(center.y + radiusY * dy)
       });
       const x = dx * co - dy * si;
       dy = dy * co + dx * si;

@@ -354,6 +354,28 @@ describe('Polygon Offset Tests', () => {
       JoinType.Miter, EndType.Polygon)).toHaveLength(1);
   });
 
+  test('offset coordinates round half away from zero, as in C++', () => {
+    // every offset edge lands on an exact half here. Math.round would round each
+    // negative half up, moving the whole result one unit toward the positive
+    const square = Clipper.makePath([-341,-343, -231,-343, -231,-237, -341,-237]);
+    expect(Clipper.inflatePaths([square], -11.5, JoinType.Miter, EndType.Polygon)).toEqual(
+      [Clipper.makePath([-243,-332, -243,-249, -330,-249, -330,-332])]);
+    expect(Clipper.inflatePaths([square], 11.5, JoinType.Miter, EndType.Polygon)).toEqual(
+      [Clipper.makePath([-220,-226, -353,-226, -353,-355, -220,-355])]);
+
+    // the same square mirrored into positive coordinates gives the mirrored result
+    const mirrored = square.map(pt => ({ x: -pt.x, y: -pt.y, z: 0 }));
+    const a = Clipper.inflatePaths([square], 11.5, JoinType.Miter, EndType.Polygon)[0];
+    const b = Clipper.inflatePaths([mirrored], 11.5, JoinType.Miter, EndType.Polygon)[0];
+    const key = (pts: { x: number; y: number }[]): string[] => pts.map(pt => `${pt.x},${pt.y}`).sort();
+    expect(key(b)).toEqual(key(a.map(pt => ({ x: -pt.x, y: -pt.y }))));
+
+    // scaling floating point paths rounds the same way
+    const scaled = Clipper.scalePath64([{ x: -1.25, y: -0.25 }, { x: 1.25, y: 0.25 }, { x: -0.125, y: 0.125 }], 2);
+    expect(scaled.map(pt => [pt.x, pt.y])).toEqual([[-3, -1], [3, 1], [0, 0]]);
+    expect(Object.is(scaled[2].x, -0)).toBe(false);
+  });
+
   // https://github.com/countertype/clipper2-ts/issues/44
   // Expected points are the output of C++ InflatePaths. Coordinates may differ by 1
   // because C++ rounds with nearbyint and this port rounds with Math.round.
