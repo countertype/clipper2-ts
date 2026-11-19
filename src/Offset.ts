@@ -29,43 +29,48 @@ export enum EndType {
   Round = 4
 }
 
-const B0 = BigInt(0);
-
-// a path's area, exactly, as its sign and twice its magnitude
+// a path's area, as its exact sign and twice its magnitude
 interface ExactArea {
   sign: number;
-  twiceMagnitude: bigint;
+  twiceMagnitude: number;
 }
 
 function exactArea(path: Path64): ExactArea {
   const cnt = path.length;
   let maxAbs = 0;
+  let allSafe = true;
   for (let i = 0; i < cnt; i++) {
     const pt = path[i];
     const ax = pt.x < 0 ? -pt.x : pt.x;
     const ay = pt.y < 0 ? -pt.y : pt.y;
     if (ax > maxAbs) maxAbs = ax;
     if (ay > maxAbs) maxAbs = ay;
+    if (allSafe && !(Number.isSafeInteger(pt.x) && Number.isSafeInteger(pt.y))) allSafe = false;
   }
 
-  let twice: bigint;
   // TS: the shoelace sum is exact in doubles while every partial sum stays a safe
-  // integer, which holds for most paths; C++ always sums in 128 bits
-  if (2 * cnt * maxAbs * maxAbs < Number.MAX_SAFE_INTEGER) {
+  // integer; C++ always sums in 128 bits. Coordinates that are not safe integers
+  // (the library's contract, but not checked here) are summed in doubles too, as
+  // InternalClipper.area does, since BigInt cannot represent them.
+  if (!allSafe || 2 * cnt * maxAbs * maxAbs < Number.MAX_SAFE_INTEGER) {
     let sum = 0;
     for (let i = 0, j = cnt - 1; i < cnt; j = i++) {
       sum += path[j].x * path[i].y - path[i].x * path[j].y;
     }
-    twice = BigInt(sum);
-  } else {
-    twice = B0;
-    for (let i = 0, j = cnt - 1; i < cnt; j = i++) {
-      twice += BigInt(path[j].x) * BigInt(path[i].y) - BigInt(path[i].x) * BigInt(path[j].y);
-    }
+    if (sum < 0) return { sign: -1, twiceMagnitude: -sum };
+    return { sign: sum > 0 ? 1 : 0, twiceMagnitude: sum };
   }
 
-  if (twice < B0) return { sign: -1, twiceMagnitude: -twice };
-  return { sign: twice > B0 ? 1 : 0, twiceMagnitude: twice };
+  // The products no longer fit a double, so BigInt carries the sum, as intermediate
+  // arithmetic only. The sign is exact. The magnitude is returned as a number: exact
+  // up to 2^53, the nearest double above that, where two paths would have to agree
+  // to 16 digits without being equal for their order to differ from C++.
+  let twice = BigInt(0);
+  for (let i = 0, j = cnt - 1; i < cnt; j = i++) {
+    twice += BigInt(path[j].x) * BigInt(path[i].y) - BigInt(path[i].x) * BigInt(path[j].y);
+  }
+  if (twice < 0) return { sign: -1, twiceMagnitude: Number(-twice) };
+  return { sign: twice > 0 ? 1 : 0, twiceMagnitude: Number(twice) };
 }
 
 // true when path lies inside a container, judged by the first of its vertices that locate
@@ -337,7 +342,7 @@ class Group {
 
     // sizes compare exactly, so paths of nearly equal size rank the same however they're wound.
     // The first path wins a tie.
-    let largest = B0;
+    let largest = 0;
     for (let i = 0; i < this.inPaths.length; i++) {
       const a = exactArea(this.inPaths[i]);
       this.areas.push(a);
@@ -470,7 +475,7 @@ export class ClipperOffset {
     if (!isMixed && !hasHoles) return;
 
     // TS: the lists below are only built once it's known they are needed
-    const sizes: bigint[] = [];      // of each path with area, over all groups
+    const sizes: number[] = [];      // of each path with area, over all groups
     const groupIdxs: number[] = [];  // its group
     const pathIdxs: number[] = [];   // and its index in that group
     const bounds: Rect64[] = [];
@@ -506,7 +511,8 @@ export class ClipperOffset {
 
     if (isMixed) {
       order.sort((a, b) => {
-        if (sizes[a] !== sizes[b]) return sizes[a] > sizes[b] ? -1 : 1;
+        if (sizes[a] > sizes[b]) return -1;
+        if (sizes[a] < sizes[b]) return 1;
         const oa = isGroupOuter(a), ob = isGroupOuter(b);
         return oa === ob ? 0 : (oa ? -1 : 1);
       });
@@ -547,7 +553,7 @@ export class ClipperOffset {
           });
 
         // smallest first, since only the smallest few enclosers are usually needed
-        enclosers.sort((a, b) => sizes[a] === sizes[b] ? 0 : (sizes[a] < sizes[b] ? -1 : 1));
+        enclosers.sort((a, b) => sizes[a] < sizes[b] ? -1 : (sizes[a] > sizes[b] ? 1 : 0));
         let innermost = cnt;
         let isHole = false;
 

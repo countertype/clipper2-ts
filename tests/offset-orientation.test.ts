@@ -328,6 +328,22 @@ describe('offset orientation (PolyClipping/Clipper2 64a9ecc)', () => {
     }
   });
 
+  test('large or non-integer coordinates do not break the area ranking', () => {
+    // the area sum needs BigInt as intermediate arithmetic above about 3e7; the result is a number
+    const big = Clipper.makePath([0,0, 3e14,0, 3e14,3e14, 0,3e14]);
+    const hole = Clipper.makePath([1e14,1e14, 1e14,2e14, 2e14,2e14, 2e14,1e14]);
+    const solution = Clipper.inflatePaths([hole, big], 10, JoinType.Miter, EndType.Polygon);
+    expect(solution).toHaveLength(2);
+    expect(Clipper.areaPaths(solution)).toBeGreaterThan(0);
+
+    // BigInt cannot hold these; they used to throw a raw conversion error here
+    const fractional: Paths64 = [[
+      { x: 0.5, y: 0.25 }, { x: 5e7 + 0.5, y: 0.25 }, { x: 5e7 + 0.5, y: 5e7 + 0.75 }, { x: 0.5, y: 5e7 + 0.75 }
+    ]];
+    expect(() => Clipper.inflatePaths(fractional, 10, JoinType.Miter, EndType.Polygon)).not.toThrow();
+    expect(Clipper.inflatePaths(fractional, 10, JoinType.Miter, EndType.Polygon)).toHaveLength(1);
+  });
+
   test('a zero delta normalizes the winding too', () => {
     // a zero delta is insignificant like any other below half a unit
     const square = makeSquare(0, 0, 100, true);
