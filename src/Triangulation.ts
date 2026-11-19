@@ -11,6 +11,27 @@
 import { Point64, Path64, Paths64 } from './Core.js';
 import { adaptiveOrient2dSign, adaptiveIncircleSign } from './Shewchuk.js';
 
+// Triangulation is deprecated: upstream has withdrawn its triangulation module
+// and it will be removed from this library in the next release (see issue #41).
+let deprecationWarned = false;
+
+function warnDeprecated(): void {
+  if (deprecationWarned) return;
+  deprecationWarned = true;
+  const message = 'clipper2-ts: triangulation is deprecated and will be removed in the next release. ' +
+    'See https://github.com/countertype/clipper2-ts/issues/41';
+  const proc = (globalThis as {
+    process?: { emitWarning?: (warning: string, options: { type: string; code: string }) => void }
+  }).process;
+  if (proc && typeof proc.emitWarning === 'function') {
+    // in Node this can be silenced with --no-deprecation or traced with --trace-deprecation
+    proc.emitWarning(message, { type: 'DeprecationWarning', code: 'CLIPPER2TS_TRIANGULATION' });
+  } else if (typeof console !== 'undefined') {
+    console.warn(message);
+  }
+}
+
+/** @deprecated Triangulation will be removed in the next release. See https://github.com/countertype/clipper2-ts/issues/41 */
 export enum TriangulateResult {
   success,
   fail,
@@ -64,6 +85,7 @@ class Triangle {
 // Delaunay class declaration & implementation
 // -------------------------------------------------------------------------
 
+/** @deprecated Triangulation will be removed in the next release. See https://github.com/countertype/clipper2-ts/issues/41 */
 export class Delaunay {
   private readonly allVertices: Vertex2[] = [];
   private readonly allEdges: Edge[] = [];
@@ -79,13 +101,12 @@ export class Delaunay {
   private readonly _edgesA: (Edge | null)[] = [null, null, null];
   private readonly _edgesB: (Edge | null)[] = [null, null, null];
 
-  /**
-   * Unrestorable constraints make execute return fail; retry without preservation
-   * only if simplified output is acceptable, never for a cap requiring conformity.
-   * @param delaunay Optimize interior edges using Delaunay legalization (default true).
-   * @param preserveCollinear Retain every nonzero boundary segment exactly (default false).
-   */
+  // Unrestorable constraints make execute return fail; retry without preservation
+  // only if simplified output is acceptable, never for a cap requiring conformity.
+  // delaunay: optimize interior edges using Delaunay legalization (default true).
+  // preserveCollinear: retain every nonzero boundary segment exactly (default false).
   constructor(delaunay: boolean = true, preserveCollinear: boolean = false) {
+    warnDeprecated(); // once per process
     this.useDelaunay = delaunay;
     this.preserveCollinear = preserveCollinear;
   }
@@ -431,7 +452,7 @@ export class Delaunay {
     }
   }
 
-  /** Restore skipped boundary subdivisions before legalizing the new interior edges. */
+  // Restore skipped boundary subdivisions before legalizing the new interior edges.
   private restoreBoundary(paths: Paths64): boolean {
     const pointKey = (p: Point64): string => `${p.x},${p.y}`;
     const edgeKey = (a: Point64, b: Point64): string =>

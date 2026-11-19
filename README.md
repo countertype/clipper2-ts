@@ -57,6 +57,8 @@ Older Node.js versions must use `import()` from CommonJS instead.
 
 ### Triangulation
 
+> **Deprecated.** Clipper2 has withdrawn its triangulation module, and triangulation will be removed from this library in the next release ([#41](https://github.com/countertype/clipper2-ts/issues/41)). It still works in this release and logs a deprecation warning the first time it is used.
+
 Convert polygons into triangles using constrained Delaunay triangulation:
 
 ```typescript

@@ -1146,28 +1146,26 @@ export function ellipseD(center: PointD, radiusX: number, radiusY: number = 0, s
 }
 
 // Triangulation
-/**
- * Triangulate non-intersecting outer/hole contours. When preserveCollinear is true,
- * success retains every nonzero input boundary segment; consecutive duplicates and
- * explicit closing duplicates are ignored. Unrestorable constraints return fail,
- * even if simplified triangulation could succeed. Callers permitting simplified
- * output may explicitly retry without preservation; conforming mesh caps must reject it.
- * @param useDelaunay Optimize interior edges using Delaunay legalization (default true).
- * @param preserveCollinear Retain every nonzero boundary segment exactly (default false).
- */
+// Triangulate non-intersecting outer/hole contours. When preserveCollinear is true,
+// success retains every nonzero input boundary segment; consecutive duplicates and
+// explicit closing duplicates are ignored. Unrestorable constraints return fail,
+// even if simplified triangulation could succeed. Callers permitting simplified
+// output may explicitly retry without preservation; conforming mesh caps must reject it.
+// useDelaunay: optimize interior edges using Delaunay legalization (default true).
+// preserveCollinear: retain every nonzero boundary segment exactly (default false).
+/** @deprecated Triangulation will be removed in the next release. See https://github.com/countertype/clipper2-ts/issues/41 */
 export function triangulate(pp: Paths64, useDelaunay: boolean = true, preserveCollinear: boolean = false): { result: TriangulateResult, solution: Paths64 } {
   const d = new Delaunay(useDelaunay, preserveCollinear);
   return d.execute(pp);
 }
 
-/**
- * Boundary preservation applies after rounding coordinates to decPlaces (clamped to 0..8).
- * Unrestorable constraints return fail; callers permitting simplified output may
- * explicitly retry without preservation. Conforming mesh caps must reject that failure.
- * @param decPlaces Decimal precision for the integer grid, clamped to 0..8.
- * @param useDelaunay Optimize interior edges using Delaunay legalization (default true).
- * @param preserveCollinear Retain every nonzero rounded boundary segment exactly (default false).
- */
+// Boundary preservation applies after rounding coordinates to decPlaces (clamped to 0..8).
+// Unrestorable constraints return fail; callers permitting simplified output may
+// explicitly retry without preservation. Conforming mesh caps must reject that failure.
+// decPlaces: decimal precision for the integer grid, clamped to 0..8.
+// useDelaunay: optimize interior edges using Delaunay legalization (default true).
+// preserveCollinear: retain every nonzero rounded boundary segment exactly (default false).
+/** @deprecated Triangulation will be removed in the next release. See https://github.com/countertype/clipper2-ts/issues/41 */
 export function triangulateD(pp: PathsD, decPlaces: number, useDelaunay: boolean = true, preserveCollinear: boolean = false): { result: TriangulateResult, solution: PathsD } {
   let scale: number;
   if (decPlaces <= 0) scale = 1.0;
