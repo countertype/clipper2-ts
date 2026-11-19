@@ -419,7 +419,7 @@ export class Delaunay {
     return tri;
   }
 
-  private forceLegal(edge: Edge): void {
+  private forceLegal(edge: Edge, delaunay: boolean): void {
     if (edge.triA === null || edge.triB === null) return;
 
     let vertA: Vertex2 | null = null;
@@ -463,17 +463,22 @@ export class Delaunay {
     if (vertA === null || vertB === null) return;
 
     const cpsA = this.crossProductSign(vertA.pt, edge.vL.pt, edge.vR.pt);
-    if (cpsA === 0)
-      return;
-
     const cpsB = this.crossProductSign(vertB.pt, edge.vL.pt, edge.vR.pt);
-    if (cpsB === 0 || cpsA === cpsB)
-      return;
-
-    const ictResult = this.inCircleTest(vertA.pt, edge.vL.pt, edge.vR.pt, vertB.pt);
-    if (ictResult === 0 ||
-      (this.rightTurning(vertA.pt, edge.vL.pt, edge.vR.pt) === (ictResult < 0)))
-      return;
+    if (cpsA === 0 || cpsB === 0) {
+      // A zero-area sweep triangle can encode a vertex inside its neighbor's edge.
+      // Rotate that long edge to split the neighbor instead of dropping the constraint.
+      if (cpsA === 0 && cpsB === 0) return;
+      const point = cpsA === 0 ? vertA.pt : vertB.pt;
+      const a = edge.vL.pt, b = edge.vR.pt;
+      if ((point.x === a.x && point.y === a.y) || (point.x === b.x && point.y === b.y) ||
+        point.x < Math.min(a.x, b.x) || point.x > Math.max(a.x, b.x) ||
+        point.y < Math.min(a.y, b.y) || point.y > Math.max(a.y, b.y)) return;
+    } else {
+      if (!delaunay || cpsA === cpsB) return;
+      const ictResult = this.inCircleTest(vertA.pt, edge.vL.pt, edge.vR.pt, vertB.pt);
+      if (ictResult === 0 ||
+        (this.rightTurning(vertA.pt, edge.vL.pt, edge.vR.pt) === (ictResult < 0))) return;
+    }
 
     edge.vL = vertA;
     edge.vR = vertB;
@@ -565,7 +570,7 @@ export class Delaunay {
   }
 
 
-  private doTriangulateLeft(edge: Edge, pivot: Vertex2, minY: number, limitFan = false): void {
+  private doTriangulateLeft(edge: Edge, pivot: Vertex2, minY: number): void {
     let vAlt: Vertex2 | null = null;
     let eAlt: Edge | null = null;
 
@@ -589,13 +594,6 @@ export class Delaunay {
 
     if (vAlt === null || vAlt.pt.y < minY || eAlt === null) return;
 
-    // Domiter & Zalik 2008, §3.2: stop fan extension when angle at pivot > pi/2
-    if (limitFan) {
-      const dvx = v.pt.x - pivot.pt.x, dvy = v.pt.y - pivot.pt.y;
-      const dax = vAlt.pt.x - pivot.pt.x, day = vAlt.pt.y - pivot.pt.y;
-      if (dvx * dax + dvy * day < 0) return;
-    }
-
     if (vAlt.pt.y < pivot.pt.y) {
       if (Delaunay.isLeftEdge(eAlt)) return;
     } else if (vAlt.pt.y > pivot.pt.y) {
@@ -610,10 +608,10 @@ export class Delaunay {
     this.createTriangle(edge, eAlt, eX);
 
     if (!Delaunay.edgeCompleted(eX))
-      this.doTriangulateLeft(eX, vAlt, minY, true);
+      this.doTriangulateLeft(eX, vAlt, minY);
   }
 
-  private doTriangulateRight(edge: Edge, pivot: Vertex2, minY: number, limitFan = false): void {
+  private doTriangulateRight(edge: Edge, pivot: Vertex2, minY: number): void {
     let vAlt: Vertex2 | null = null;
     let eAlt: Edge | null = null;
 
@@ -637,13 +635,6 @@ export class Delaunay {
 
     if (vAlt === null || vAlt.pt.y < minY || eAlt === null) return;
 
-    // Domiter & Zalik 2008, §3.2: stop fan extension when angle at pivot > pi/2
-    if (limitFan) {
-      const dvx = v.pt.x - pivot.pt.x, dvy = v.pt.y - pivot.pt.y;
-      const dax = vAlt.pt.x - pivot.pt.x, day = vAlt.pt.y - pivot.pt.y;
-      if (dvx * dax + dvy * day < 0) return;
-    }
-
     if (vAlt.pt.y < pivot.pt.y) {
       if (Delaunay.isRightEdge(eAlt)) return;
     } else if (vAlt.pt.y > pivot.pt.y) {
@@ -658,7 +649,7 @@ export class Delaunay {
     this.createTriangle(edge, eX, eAlt);
 
     if (!Delaunay.edgeCompleted(eX))
-      this.doTriangulateRight(eX, vAlt, minY, true);
+      this.doTriangulateRight(eX, vAlt, minY);
   }
 
   private addEdgeToActives(edge: Edge): void {
@@ -824,12 +815,11 @@ export class Delaunay {
         this.doTriangulateLeft(e, e.vB, currY);
     }
 
-    if (this.useDelaunay) {
-      while (this.pendingDelaunayStack.length > 0) {
-        const e = this.pendingDelaunayStack.pop()!;
-        e.pendingDelaunay = false;
-        this.forceLegal(e);
-      }
+    // Repair collinear sweep triangles even when Delaunay optimization is disabled.
+    while (this.pendingDelaunayStack.length > 0) {
+      const e = this.pendingDelaunayStack.pop()!;
+      e.pendingDelaunay = false;
+      this.forceLegal(e, this.useDelaunay);
     }
 
     for (const tri of this.allTriangles) {
