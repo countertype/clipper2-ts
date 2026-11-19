@@ -1173,7 +1173,7 @@ export class ClipperOffset {
     if (radiusX <= 0) return [];
     if (radiusY <= 0) radiusY = radiusX;
     if (steps <= 2) {
-      steps = Math.ceil(Math.PI * Math.sqrt((radiusX + radiusY) / 2));
+      steps = Math.trunc(Math.PI * Math.sqrt((radiusX + radiusY) / 2)); // truncated, as in C++
     }
 
     const si = Math.sin(2 * Math.PI / steps);

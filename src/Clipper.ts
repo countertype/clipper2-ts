@@ -637,7 +637,8 @@ export function midPoint(pt1: Point64, pt2: Point64): Point64 {
       y: Number((BigInt(pt1.y) + BigInt(pt2.y)) / B2)
     };
   }
-  return { x: Math.round((pt1.x + pt2.x) / 2), y: Math.round((pt1.y + pt2.y) / 2) };
+  // integer division, as in C++ (and as the BigInt branch above does)
+  return { x: Math.trunc((pt1.x + pt2.x) / 2), y: Math.trunc((pt1.y + pt2.y) / 2) };
 }
 
 export function midPointD(pt1: PointD, pt2: PointD): PointD {
@@ -1098,7 +1099,7 @@ export function ellipse(center: Point64, radiusX: number, radiusY: number = 0, s
   if (radiusX <= 0) return [];
   if (radiusY <= 0) radiusY = radiusX;
   if (steps <= 2) {
-    steps = Math.ceil(Math.PI * Math.sqrt((radiusX + radiusY) / 2));
+    steps = Math.trunc(Math.PI * Math.sqrt((radiusX + radiusY) / 2)); // truncated, as in C++
   }
 
   const si = Math.sin(2 * Math.PI / steps);
@@ -1123,7 +1124,7 @@ export function ellipseD(center: PointD, radiusX: number, radiusY: number = 0, s
   if (radiusX <= 0) return [];
   if (radiusY <= 0) radiusY = radiusX;
   if (steps <= 2) {
-    steps = Math.ceil(Math.PI * Math.sqrt((radiusX + radiusY) / 2));
+    steps = Math.trunc(Math.PI * Math.sqrt((radiusX + radiusY) / 2)); // truncated, as in C++
   }
 
   const si = Math.sin(2 * Math.PI / steps);

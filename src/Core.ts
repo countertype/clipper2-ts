@@ -649,7 +649,10 @@ function path2ContainsPath1(path1: Path64, path2: Path64): boolean {
         break;
     }
   }
-  // since path1's location is still equivocal, check its midpoint
+  if (pip !== PointInPolygonResult.IsInside) return false;
+  // result is likely true but check midpoint
+  // (as in C++: the midpoint must be inside, not just on the edge, and it is
+  // taken by integer division, which truncates toward zero)
   const mp = icGetBounds(path1);
   let midX: number, midY: number;
   if (Number.isSafeInteger(mp.left) && Number.isSafeInteger(mp.right) &&
@@ -657,11 +660,11 @@ function path2ContainsPath1(path1: Path64, path2: Path64): boolean {
     midX = Number((BigInt(mp.left) + BigInt(mp.right)) / B2);
     midY = Number((BigInt(mp.top) + BigInt(mp.bottom)) / B2);
   } else {
-    midX = Math.round((mp.left + mp.right) / 2);
-    midY = Math.round((mp.top + mp.bottom) / 2);
+    midX = Math.trunc((mp.left + mp.right) / 2);
+    midY = Math.trunc((mp.top + mp.bottom) / 2);
   }
   const midPt: Point64 = { x: midX, y: midY };
-  return icPointInPolygon(midPt, path2) !== PointInPolygonResult.IsOutside;
+  return icPointInPolygon(midPt, path2) === PointInPolygonResult.IsInside;
 }
 
 // Plain const object replaces the namespace. External callers use InternalClipper.foo()
@@ -834,9 +837,10 @@ export const Rect64Utils = {
       const midY = Number((BigInt(rect.top) + BigInt(rect.bottom)) / B2);
       return { x: midX, y: midY };
     }
+    // integer division, as in C++ (and as the BigInt branch above does)
     return {
-      x: Math.round((rect.left + rect.right) / 2),
-      y: Math.round((rect.top + rect.bottom) / 2)
+      x: Math.trunc((rect.left + rect.right) / 2),
+      y: Math.trunc((rect.top + rect.bottom) / 2)
     };
   },
 

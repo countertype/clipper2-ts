@@ -1,12 +1,10 @@
-/**
- * Offsetting returns outers wound positively whatever the orientation of the
- * input, and works out which paths are outers and which are holes from their
- * size and containment.
- *
- * Ported from PolyClipping/Clipper2 64a9ecc (CPP/Tests/TestOffsetOrientation.cpp
- * and the tests that commit added to CPP/Tests/TestOffsets.cpp).
- * https://github.com/PolyClipping/Clipper2/issues/13
- */
+// Offsetting returns outers wound positively whatever the orientation of the
+// input, and works out which paths are outers and which are holes from their
+// size and containment.
+//
+// Ported from PolyClipping/Clipper2 64a9ecc (CPP/Tests/TestOffsetOrientation.cpp
+// and the tests that commit added to CPP/Tests/TestOffsets.cpp).
+// https://github.com/PolyClipping/Clipper2/issues/13
 import { describe, test, expect } from 'vitest';
 import {
   Clipper, ClipperOffset, JoinType, EndType,

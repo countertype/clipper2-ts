@@ -266,6 +266,37 @@ describe('Comprehensive Polygon Clipping Tests', () => {
     expect(Clipper.areaPaths(Clipper.union(paths.slice(0, 2), FillRule.Positive))).toBe(2072202.5);
   });
 
+  test('a path that only touches another is not nested inside it, as in C++', () => {
+    // the small triangle shares all three vertices with the larger hole. Its
+    // midpoint is not strictly inside that hole, so both are holes of the outer
+    const subject: Paths64 = [
+      Clipper.makePath([-6,-2, -3,-8, -10,11, -9,4]),
+      Clipper.makePath([-10,8, 4,4, -15,4, -12,-13, 9,-15, 6,10, 4,-10]),
+      Clipper.makePath([6,-4, 0,0, 7,7, -13,11])
+    ];
+    const tree = new PolyTree64();
+    Clipper.booleanOpWithPolyTree(ClipType.Xor, subject, null, tree, FillRule.NonZero);
+    expect(tree.count).toBe(1);
+    const outer = tree.child(0);
+    expect(outer.count).toBe(2);
+    expect(outer.child(0).isHole).toBe(true);
+    expect(outer.child(0).count).toBe(0);
+    expect(outer.child(1).isHole).toBe(true);
+    expect(outer.child(1).polygon!.map(pt => [pt.x, pt.y])).toEqual([[-4, 4], [-9, 8], [-7, 4]]);
+  });
+
+  test('midpoints are taken by integer division, as in C++', () => {
+    expect(Clipper.midPoint({ x: 1, y: 2 }, { x: 4, y: 5 })).toEqual({ x: 2, y: 3 });
+    expect(Clipper.midPoint({ x: -1, y: -2 }, { x: -4, y: -5 })).toEqual({ x: -2, y: -3 });
+  });
+
+  test('ellipse truncates its default number of steps, as in C++', () => {
+    // pi * sqrt((1.5 + 8) / 2) is 6.85, so 6 vertices
+    expect(Clipper.ellipse({ x: -13, y: 8 }, 1.5, 8).map(pt => [pt.x, pt.y]))
+      .toEqual([[-12, 8], [-12, 15], [-14, 15], [-15, 8], [-14, 1], [-12, 1]]);
+    expect(Clipper.ellipse({ x: 0, y: 0 }, 100)).toHaveLength(31);
+  });
+
   test('intersection points are never -0', () => {
     const solution = Clipper.intersect(
       [Clipper.makePath([-10,-3, 10,4, 10,-10])],

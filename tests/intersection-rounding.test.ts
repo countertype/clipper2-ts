@@ -1,9 +1,7 @@
-/**
- * Regression tests ported from PolyClipping/Clipper2 (CPP/Tests/TestPolygons.cpp
- * and TestRectClip.cpp) for the fixes to how intersection points are rounded
- * and ordered: ec5f2d4, f774daf, 4a3bf64 and 2b32367.
- * https://github.com/PolyClipping/Clipper2/issues/13
- */
+// Regression tests ported from PolyClipping/Clipper2 (CPP/Tests/TestPolygons.cpp
+// and TestRectClip.cpp) for the fixes to how intersection points are rounded
+// and ordered: ec5f2d4, f774daf, 4a3bf64 and 2b32367.
+// https://github.com/PolyClipping/Clipper2/issues/13
 import { describe, test, expect } from 'vitest';
 import { Clipper, FillRule, type Paths64 } from '../src';
 
