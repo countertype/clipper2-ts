@@ -72,6 +72,8 @@
   "files": [
     "dist/**/*",
     "src/**/*",
+    "!dist/cdt",
+    "!src/cdt",
     "README.md",
     "LICENSE"
   ],
