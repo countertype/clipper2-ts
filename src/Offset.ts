@@ -37,25 +37,30 @@ interface ExactArea {
 
 function exactArea(path: Path64): ExactArea {
   const cnt = path.length;
-  let maxAbs = 0;
+  let minX = path[0].x, maxX = minX, minY = path[0].y, maxY = minY;
   let allSafe = true;
   for (let i = 0; i < cnt; i++) {
     const pt = path[i];
-    const ax = pt.x < 0 ? -pt.x : pt.x;
-    const ay = pt.y < 0 ? -pt.y : pt.y;
-    if (ax > maxAbs) maxAbs = ax;
-    if (ay > maxAbs) maxAbs = ay;
+    if (pt.x < minX) minX = pt.x; else if (pt.x > maxX) maxX = pt.x;
+    if (pt.y < minY) minY = pt.y; else if (pt.y > maxY) maxY = pt.y;
     if (allSafe && !(Number.isSafeInteger(pt.x) && Number.isSafeInteger(pt.y))) allSafe = false;
   }
 
-  // TS: the shoelace sum is exact in doubles while every partial sum stays a safe
-  // integer; C++ always sums in 128 bits. Coordinates that are not safe integers
-  // (the library's contract, but not checked here) are summed in doubles too, as
-  // InternalClipper.area does, since BigInt cannot represent them.
-  if (!allSafe || 2 * cnt * maxAbs * maxAbs < Number.MAX_SAFE_INTEGER) {
+  // TS: C++ always sums in 128 bits. Here the area is taken relative to the path's own
+  // corner, which doesn't change it, so the size of the products depends on the path's
+  // extent and not on how far it is from the origin. The shoelace sum is then exact in
+  // doubles while every partial sum stays a safe integer, which covers most paths.
+  // Coordinates that are not safe integers (the library's contract, but not checked
+  // here) are summed in doubles too, as InternalClipper.area does.
+  const span = Math.max(maxX - minX, maxY - minY);
+  if (!allSafe || 2 * cnt * span * span < Number.MAX_SAFE_INTEGER) {
     let sum = 0;
-    for (let i = 0, j = cnt - 1; i < cnt; j = i++) {
-      sum += path[j].x * path[i].y - path[i].x * path[j].y;
+    let px = path[cnt - 1].x - minX, py = path[cnt - 1].y - minY;
+    for (let i = 0; i < cnt; i++) {
+      const x = path[i].x - minX, y = path[i].y - minY;
+      sum += px * y - x * py;
+      px = x;
+      py = y;
     }
     if (sum < 0) return { sign: -1, twiceMagnitude: -sum };
     return { sign: sum > 0 ? 1 : 0, twiceMagnitude: sum };
