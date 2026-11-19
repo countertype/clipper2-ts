@@ -304,7 +304,7 @@ describe('Polygon Offset Tests', () => {
   });
 
   // PolyClipping/Clipper2 ca30beb
-  test('a group without a closed path does not decide the orientation of the solution', () => {
+  test('a group without a closed path in front of a clockwise polygon does not empty the solution', () => {
     const clockwiseSquare = Clipper.makePath([0,0, 0,100, 100,100, 100,0]);
 
     // an empty group
@@ -313,7 +313,7 @@ describe('Polygon Offset Tests', () => {
     co.addPath(clockwiseSquare, JoinType.Miter, EndType.Polygon);
     let solution: Paths64 = [];
     co.execute(10, solution);
-    expect(Clipper.areaPaths(solution)).toBe(-14400);
+    expect(Clipper.areaPaths(solution)).toBe(14400);
 
     // a group holding only a line
     co = new ClipperOffset();
@@ -323,7 +323,7 @@ describe('Polygon Offset Tests', () => {
     co.execute(10, solution);
     const squarePart = solution.filter(p => p.every(pt => pt.y < 300));
     expect(squarePart).toHaveLength(1);
-    expect(Clipper.area(squarePart[0])).toBe(-14400);
+    expect(Clipper.area(squarePart[0])).toBe(14400);
   });
 
   // PolyClipping/Clipper2 ca30beb
