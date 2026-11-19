@@ -297,6 +297,69 @@ describe('Comprehensive Polygon Clipping Tests', () => {
     expect(Clipper.ellipse({ x: 0, y: 0 }, 100)).toHaveLength(31);
   });
 
+  // PolyClipping/Clipper2 32b0a72. In C++ the exception escapes execute; this port
+  // (like C#) catches it and returns false. Either way the clipper must be left clean.
+  test('a clipper is left clean when a Z callback throws during execute', () => {
+    const subject: Paths64 = [
+      Clipper.makePath([0,0, 100,0, 100,100, 0,100]),
+      Clipper.makePath([50,50, 150,50, 150,150, 50,150])
+    ];
+    const clip: Paths64 = [Clipper.makePath([20,-10, 80,-10, 80,200, 20,200])];
+
+    const fresh = new Clipper64();
+    fresh.addSubject(subject);
+    fresh.addClip(clip);
+    const expected: Paths64 = [];
+    fresh.execute(ClipType.Xor, FillRule.NonZero, expected);
+
+    const clipper = new Clipper64();
+    clipper.addSubject(subject);
+    clipper.addClip(clip);
+    let calls = 0;
+    clipper.zCallback = () => {
+      if (++calls === 3) throw new Error('Z callback');
+    };
+    const solution: Paths64 = [];
+    expect(clipper.execute(ClipType.Xor, FillRule.NonZero, solution)).toBe(false);
+    expect(calls).toBe(3);
+
+    clipper.zCallback = undefined;
+    expect(clipper.execute(ClipType.Xor, FillRule.NonZero, solution)).toBe(true);
+    expect(solution).toEqual(expected);
+  });
+
+  // PolyClipping/Clipper2 0812644
+  test('executing again on the same clipper gives the same results as a fresh one', () => {
+    const testCases = TestDataParser.loadAllTestCases('Polygons.txt').slice(0, 100);
+
+    for (let n = 0; n < testCases.length; n++) {
+      const tc = testCases[n];
+      const add = (c: Clipper64): Clipper64 => {
+        c.addSubject(tc.subjects);
+        c.addOpenSubject(tc.subjectsOpen);
+        c.addClip(tc.clips);
+        return c;
+      };
+      const reused = add(new Clipper64());
+
+      for (const clipType of [ClipType.Intersection, ClipType.Union, ClipType.Difference, ClipType.Xor]) {
+        const closed: Paths64 = [], open: Paths64 = [], freshClosed: Paths64 = [], freshOpen: Paths64 = [];
+        reused.execute(clipType, tc.fillRule, closed, open);
+        add(new Clipper64()).execute(clipType, tc.fillRule, freshClosed, freshOpen);
+        if (JSON.stringify(closed) !== JSON.stringify(freshClosed)) expect(closed, `test ${n + 1}`).toEqual(freshClosed);
+        if (JSON.stringify(open) !== JSON.stringify(freshOpen)) expect(open, `test ${n + 1}`).toEqual(freshOpen);
+
+        const tree = new PolyTree64(), freshTree = new PolyTree64();
+        const treeOpen: Paths64 = [], freshTreeOpen: Paths64 = [];
+        reused.execute(clipType, tc.fillRule, tree, treeOpen);
+        add(new Clipper64()).execute(clipType, tc.fillRule, freshTree, freshTreeOpen);
+        const a = JSON.stringify(Clipper.polyTreeToPaths64(tree)), b = JSON.stringify(Clipper.polyTreeToPaths64(freshTree));
+        if (a !== b) expect(a, `test ${n + 1}`).toBe(b);
+        if (JSON.stringify(treeOpen) !== JSON.stringify(freshTreeOpen)) expect(treeOpen, `test ${n + 1}`).toEqual(freshTreeOpen);
+      }
+    }
+  });
+
   test('intersection points are never -0', () => {
     const solution = Clipper.intersect(
       [Clipper.makePath([-10,-3, 10,4, 10,-10])],

@@ -3566,7 +3566,9 @@ public addPaths(paths: Paths64, polytype: PathType, isOpen: boolean = false): vo
       
       solutionClosed.length = 0;
       if (solutionOpen) solutionOpen.length = 0;
-      
+      // (an earlier execute into a PolyTree on this clipper must not carry over)
+      this.usingPolytree = false;
+
       try {
         this.executeInternal(clipType, fillRule);
         this.buildPaths(solutionClosed, solutionOpen || []);
@@ -3726,7 +3728,9 @@ export class ClipperD extends ClipperBase {
       
       solutionClosed.length = 0;
       if (solutionOpen) solutionOpen.length = 0;
-      
+      // (an earlier execute into a PolyTree on this clipper must not carry over)
+      this.usingPolytree = false;
+
       let success = true;
       try {
         this.executeInternal(clipType, fillRule);
