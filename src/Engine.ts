@@ -3569,14 +3569,14 @@ public addPaths(paths: Paths64, polytype: PathType, isOpen: boolean = false): vo
       // (an earlier execute into a PolyTree on this clipper must not carry over)
       this.usingPolytree = false;
 
+      // an exception (from a Z callback, say) escapes execute, as in C++; C# caught
+      // it and returned false. Either way the clipper is left clean for the next call
       try {
         this.executeInternal(clipType, fillRule);
         this.buildPaths(solutionClosed, solutionOpen || []);
-      } catch {
-        this.succeeded = false;
+      } finally {
+        this.clearSolutionOnly();
       }
-      
-      this.clearSolutionOnly();
       return this.succeeded;
     } else {
       // PolyTree64 version
@@ -3590,11 +3590,9 @@ public addPaths(paths: Paths64, polytype: PathType, isOpen: boolean = false): vo
       try {
         this.executeInternal(clipType, fillRule);
         this.buildTree(polytree, openPaths || []);
-      } catch {
-        this.succeeded = false;
+      } finally {
+        this.clearSolutionOnly();
       }
-      
-      this.clearSolutionOnly();
       return this.succeeded;
     }
   }
@@ -3731,18 +3729,16 @@ export class ClipperD extends ClipperBase {
       // (an earlier execute into a PolyTree on this clipper must not carry over)
       this.usingPolytree = false;
 
-      let success = true;
+      // an exception escapes execute, as in C++ (see Clipper64.execute)
       try {
         this.executeInternal(clipType, fillRule);
         // Call regular buildPaths which includes cleanCollinear and fixSelfIntersects
         this.buildPaths(solClosed64, solOpen64);
-      } catch {
-        success = false;
+      } finally {
+        this.clearSolutionOnly();
       }
-      
-      this.clearSolutionOnly();
-      if (!success) return false;
-      
+
+
       // Convert Paths64 to PathsD
       for (const path of solClosed64) {
         solutionClosed.push(this.scalePathDFromInt(path, this.invScale));
@@ -3764,15 +3760,13 @@ export class ClipperD extends ClipperBase {
       this.usingPolytree = true;
       polytree.scale = this.scale;
       
-      let success = true;
       try {
         this.executeInternal(clipType, fillRule);
         this.buildTreeD(polytree, openPaths || []);
-      } catch {
-        success = false;
+      } finally {
+        this.clearSolutionOnly();
       }
-      this.clearSolutionOnly();
-      return success;
+      return true;
     }
   }
 }

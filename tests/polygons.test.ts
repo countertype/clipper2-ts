@@ -1,6 +1,6 @@
 // Comprehensive Polygon Clipping Tests
 import { describe, test, expect } from 'vitest';
-import { Clipper64, ClipType, FillRule, Paths64, Clipper, PolyTree64 } from '../src';
+import { Clipper64, ClipperD, ClipType, FillRule, Paths64, PathsD, Clipper, PolyTree64 } from '../src';
 import { TestDataParser } from './test-data-parser';
 
 describe('Comprehensive Polygon Clipping Tests', () => {
@@ -297,9 +297,8 @@ describe('Comprehensive Polygon Clipping Tests', () => {
     expect(Clipper.ellipse({ x: 0, y: 0 }, 100)).toHaveLength(31);
   });
 
-  // PolyClipping/Clipper2 32b0a72. In C++ the exception escapes execute; this port
-  // (like C#) catches it and returns false. Either way the clipper must be left clean.
-  test('a clipper is left clean when a Z callback throws during execute', () => {
+  // PolyClipping/Clipper2 32b0a72
+  test('a clipper is left clean when an exception escapes execute', () => {
     const subject: Paths64 = [
       Clipper.makePath([0,0, 100,0, 100,100, 0,100]),
       Clipper.makePath([50,50, 150,50, 150,150, 50,150])
@@ -320,12 +319,31 @@ describe('Comprehensive Polygon Clipping Tests', () => {
       if (++calls === 3) throw new Error('Z callback');
     };
     const solution: Paths64 = [];
-    expect(clipper.execute(ClipType.Xor, FillRule.NonZero, solution)).toBe(false);
+    expect(() => clipper.execute(ClipType.Xor, FillRule.NonZero, solution)).toThrow('Z callback');
     expect(calls).toBe(3);
 
     clipper.zCallback = undefined;
     expect(clipper.execute(ClipType.Xor, FillRule.NonZero, solution)).toBe(true);
     expect(solution).toEqual(expected);
+
+    // the same for PolyTree output, and for the floating point clipper
+    const tree = new PolyTree64();
+    calls = 0;
+    clipper.zCallback = () => { if (++calls === 3) throw new Error('Z callback'); };
+    expect(() => clipper.execute(ClipType.Xor, FillRule.NonZero, tree)).toThrow('Z callback');
+    clipper.zCallback = undefined;
+    clipper.execute(ClipType.Xor, FillRule.NonZero, solution);
+    expect(solution).toEqual(expected);
+
+    const clipperD = new ClipperD(2);
+    clipperD.addSubjectPaths(subject);
+    clipperD.addClipPaths(clip);
+    clipperD.zCallback = () => { throw new Error('Z callback D'); };
+    const solutionD: PathsD = [];
+    expect(() => clipperD.execute(ClipType.Xor, FillRule.NonZero, solutionD)).toThrow('Z callback D');
+    clipperD.zCallback = undefined;
+    expect(clipperD.execute(ClipType.Xor, FillRule.NonZero, solutionD)).toBe(true);
+    expect(solutionD.map(p => p.map(pt => ({ x: pt.x, y: pt.y })))).toEqual(expected.map(p => p.map(pt => ({ x: pt.x, y: pt.y }))));
   });
 
   // PolyClipping/Clipper2 0812644
