@@ -198,11 +198,12 @@ export class Delaunay {
       }
 
       // Now at a locMax, so descend to next locMin
-      const vPrevPrev = vPrev;
+      let vPrevPrev = vPrev;
       while (i !== i0 && path[i].y >= vPrev.pt.y) {
         const v = new Vertex2(path[i]);
         this.allVertices.push(v);
         this.createEdge(v, vPrev, EdgeKind.descend);
+        vPrevPrev = vPrev;
         vPrev = v;
         i = iNext;
         iNext = Delaunay.next(i, len);
@@ -678,11 +679,45 @@ export class Delaunay {
         }
         e = e.nextE;
       }
+      if (changed) continue;
+
+      // A vertex lying exactly on the bridge also blocks it. End the bridge at
+      // the blocking vertex nearest vAbove instead of running an edge through
+      // it (PolyClipping/Clipper2 #12). Horizontal bridges are left alone:
+      // collinear vertices on a horizontal are handled by the horizontal pass.
+      let nearest: Vertex2 | null = null;
+      let nearestD = 0;
+      e = this.firstActive;
+      while (e !== null) {
+        const vOn = this.vertexOnSegment(e, vBest, vAbove);
+        if (vOn !== null) {
+          const d = this.distanceSqr(vOn.pt, vAbove.pt);
+          if (nearest === null || d < nearestD) { nearest = vOn; nearestD = d; }
+        }
+        e = e.nextE;
+      }
+      if (nearest !== null && nearest.pt.y !== yAbove) {
+        vBest = nearest;
+        changed = true;
+      }
     }
 
     return this.createEdge(vBest, vAbove, EdgeKind.loose);
   }
 
+  // Returns an endpoint of e that lies strictly inside the segment a-b, or null.
+  private vertexOnSegment(e: Edge, a: Vertex2, b: Vertex2): Vertex2 | null {
+    for (const w of [e.vB, e.vT]) {
+      if (w === a || w === b) continue;
+      if (this.crossProductSign(a.pt, b.pt, w.pt) !== 0) continue;
+      const p = w.pt;
+      const inX = (p.x > a.pt.x) === (p.x < b.pt.x) && p.x !== a.pt.x && p.x !== b.pt.x;
+      const inY = (p.y > a.pt.y) === (p.y < b.pt.y) && p.y !== a.pt.y && p.y !== b.pt.y;
+      // collinear and inside the bounding range of the segment on the non-degenerate axis
+      if ((a.pt.x !== b.pt.x && inX) || (a.pt.x === b.pt.x && inY)) return w;
+    }
+    return null;
+  }
 
   private doTriangulateLeft(edge: Edge, pivot: Vertex2, minY: number): void {
     let vAlt: Vertex2 | null = null;
@@ -811,23 +846,17 @@ export class Delaunay {
     // if necessary fix path orientation because the algorithm 
     // expects clockwise outer paths and counter-clockwise inner paths
     if (this.lowermostVertex!.innerLM) {
-      // the orientation of added paths must be wrong, so
-      // 1. reverse innerLM flags ...
-      while (this.locMinStack.length > 0) {
-        const lm = this.locMinStack.pop()!;
-        lm.innerLM = !lm.innerLM;
+      // the orientation of added paths must be wrong, so add them again
+      // reversed. (Flipping innerLM flags and edge kinds in place, as the
+      // reference does, leaves horizontals with collinear vertices wrong.)
+      this.cleanUp();
+      const reversed = paths.map(p => [...p].reverse());
+      if (!this.addPaths(reversed)) {
+        return { result: TriangulateResult.noPolygons, solution: sol };
       }
-      // 2. swap edge kinds
-      for (const e of this.allEdges) {
-        if (e.kind === EdgeKind.ascend)
-          e.kind = EdgeKind.descend;
-        else if (e.kind === EdgeKind.descend)
-          e.kind = EdgeKind.ascend;
-      }
-    } else {
-      // path orientation is fine so ...
-      this.locMinStack.length = 0;
     }
+    // path orientation is fine so ...
+    this.locMinStack.length = 0;
 
     this.allEdges.sort((a, b) => {
       if (a.vL.pt.x < b.vL.pt.x) return -1;
@@ -986,43 +1015,12 @@ export class Delaunay {
     return (cross * cross) / denom;
   }
 
+  // Always uses the exact orientation-based test. The double-precision
+  // parametric version (as in C++) misclassifies segments that touch at a
+  // vertex lying exactly on the other segment, which left overlapping
+  // triangles in axis-aligned input.
   private segsIntersect(s1a: Point64, s1b: Point64, s2a: Point64, s2b: Point64): IntersectKind {
-    if (!this.fastMath)
-      return Delaunay.segsIntersect(s1a, s1b, s2a, s2b);
-
-    // ignore segments sharing an end-point
-    if ((s1a.x === s2a.x && s1a.y === s2a.y) ||
-        (s1a.x === s2b.x && s1a.y === s2b.y) ||
-        (s1b.x === s2b.x && s1b.y === s2b.y)) return IntersectKind.none;
-
-    const dy1 = s1b.y - s1a.y;
-    const dx1 = s1b.x - s1a.x;
-    const dy2 = s2b.y - s2a.y;
-    const dx2 = s2b.x - s2a.x;
-    const dxs = s1a.x - s2a.x;
-    const dys = s1a.y - s2a.y;
-
-    const cp = dy1 * dx2 - dy2 * dx1;
-    if (cp === 0) return IntersectKind.collinear;
-
-    let t = dxs * dy2 - dys * dx2;
-
-    // nb: testing for t === 0 is unreliable due to float imprecision
-    if (t >= 0) {
-      if (cp < 0 || t >= cp) return IntersectKind.none;
-    } else {
-      if (cp > 0 || t <= cp) return IntersectKind.none;
-    }
-
-    t = dxs * dy1 - dys * dx1;
-
-    if (t >= 0) {
-      if (cp > 0 && t < cp) return IntersectKind.intersect;
-    } else {
-      if (cp < 0 && t > cp) return IntersectKind.intersect;
-    }
-
-    return IntersectKind.none;
+    return Delaunay.segsIntersect(s1a, s1b, s2a, s2b);
   }
 
   private inCircleTest(ptA: Point64, ptB: Point64, ptC: Point64, ptD: Point64): number {
@@ -1199,8 +1197,9 @@ export class Delaunay {
   }
 
   private static segsIntersect(s1a: Point64, s1b: Point64, s2a: Point64, s2b: Point64): IntersectKind {
+    // ignore segments sharing an end-point (same three pairings as C++)
     if ((s1a.x === s2a.x && s1a.y === s2a.y) ||
-        (s1a.x === s2b.x && s1a.y === s2b.y) ||
+        (s1b.x === s2a.x && s1b.y === s2a.y) ||
         (s1b.x === s2b.x && s1b.y === s2b.y)) return IntersectKind.none;
 
     const d1 = adaptiveOrient2dSign(s2a.x, s2a.y, s2b.x, s2b.y, s1a.x, s1a.y);
