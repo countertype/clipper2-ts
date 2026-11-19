@@ -405,7 +405,8 @@ function roundToEven(value: number): number {
 // a negative half up (-2.5 to -2), which shifts results at negative coordinates, and
 // returns -0 for values between -0.5 and 0.
 function roundAwayFromZero(value: number): number {
-  return value < 0 ? (-Math.round(-value) || 0) : Math.round(value);
+  // (adding 0 turns -0 into 0, including for an input of -0)
+  return value > 0 ? Math.round(value) : -Math.round(-value) + 0;
 }
 
 function checkCastInt64(val: number): number {
