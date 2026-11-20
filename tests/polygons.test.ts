@@ -1,6 +1,6 @@
 // Comprehensive Polygon Clipping Tests
 import { describe, test, expect } from 'vitest';
-import { Clipper64, ClipperD, ClipType, FillRule, Paths64, PathsD, Clipper, PolyTree64 } from '../src';
+import { Clipper64, ClipperD, ClipType, FillRule, Paths64, PathsD, Clipper, ClipperOffset, PolyTree64 } from '../src';
 import { TestDataParser } from './test-data-parser';
 
 describe('Comprehensive Polygon Clipping Tests', () => {
@@ -205,6 +205,14 @@ describe('Comprehensive Polygon Clipping Tests', () => {
     success = clipper.execute(ClipType.Union, FillRule.NonZero, twoPointSolution);
     expect(success).toBe(true);
     expect(twoPointSolution.length).toBe(0);
+
+    // the same line with its closing point repeated is still two points, and must not
+    // add vertices where it crosses another path
+    const square = Clipper.makePath([0,0, 100,0, 100,100, 0,100]);
+    const expected = Clipper.union([square], FillRule.NonZero);
+    const line = Clipper.makePath([-50,50, 150,60]);
+    expect(Clipper.union([square, line], FillRule.NonZero)).toEqual(expected);
+    expect(Clipper.union([square, [...line, line[0]]], FillRule.NonZero)).toEqual(expected);
   });
 
   // Open path specific validation
@@ -295,6 +303,17 @@ describe('Comprehensive Polygon Clipping Tests', () => {
     expect(Clipper.ellipse({ x: -13, y: 8 }, 1.5, 8).map(pt => [pt.x, pt.y]))
       .toEqual([[-12, 8], [-12, 15], [-14, 15], [-15, 8], [-14, 1], [-12, 1]]);
     expect(Clipper.ellipse({ x: 0, y: 0 }, 100)).toHaveLength(31);
+  });
+
+  test('ellipse has at least 3 vertices, however small its radius', () => {
+    // pi * sqrt(0.5) is 2.2, and C++ returns the 2 vertex line that gives
+    for (const radius of [0.05, 0.5, 0.9]) {
+      const circle = Clipper.ellipseD({ x: 0, y: 0 }, radius);
+      expect(circle).toHaveLength(3);
+      expect(Clipper.areaD(circle)).toBeGreaterThan(0);
+    }
+    expect(Clipper.ellipse({ x: 0, y: 0 }, 0.9)).toHaveLength(3);
+    expect(ClipperOffset.ellipse({ x: 0, y: 0 }, 0.9)).toHaveLength(3);
   });
 
   // PolyClipping/Clipper2 32b0a72

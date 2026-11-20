@@ -21,9 +21,14 @@ function warnDeprecated(): void {
   const message = 'clipper2-ts: triangulation is deprecated and will be removed in the next release. ' +
     'See https://github.com/countertype/clipper2-ts/issues/41';
   const proc = (globalThis as {
-    process?: { emitWarning?: (warning: string, options: { type: string; code: string }) => void }
+    process?: {
+      emitWarning?: (warning: string, options: { type: string; code: string }) => void;
+      throwDeprecation?: boolean;
+    }
   }).process;
-  if (proc && typeof proc.emitWarning === 'function') {
+  // under --throw-deprecation the warning would be thrown on a later tick, where no caller
+  // can catch it, and triangulation still works in this release
+  if (proc && typeof proc.emitWarning === 'function' && !proc.throwDeprecation) {
     // in Node this can be silenced with --no-deprecation or traced with --trace-deprecation
     proc.emitWarning(message, { type: 'DeprecationWarning', code: 'CLIPPER2TS_TRIANGULATION' });
   } else if (typeof console !== 'undefined') {

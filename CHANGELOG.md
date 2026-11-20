@@ -6,7 +6,7 @@ All changes to this project will be documented in this file
 
 ### Deprecated
 
-- `Triangulation`: `triangulate`, `triangulateD`, `Delaunay` and `TriangulateResult` are deprecated and will be removed in the next release, since Clipper2 has withdrawn its triangulation module ([#41](https://github.com/countertype/clipper2-ts/issues/41)). A deprecation warning is logged on first use
+- `Triangulation`: `triangulate`, `triangulateD`, `Delaunay` and `TriangulateResult` are deprecated and will be removed in the next release, since Clipper2 has withdrawn its triangulation module ([#41](https://github.com/countertype/clipper2-ts/issues/41)). A deprecation warning is logged on first use, through `console.warn` under `--throw-deprecation` so that it cannot end the process
 
 ### Added
 
@@ -24,12 +24,12 @@ All changes to this project will be documented in this file
 - `Core`: `getLineIntersectPt` rounds intersection points instead of truncating them (PolyClipping/Clipper2 [f774daf1](https://github.com/PolyClipping/Clipper2/commit/f774daf1), [#13](https://github.com/PolyClipping/Clipper2/issues/13)); this also fixes upstream [#1083](https://github.com/AngusJohnson/Clipper2/issues/1083)
 - `Engine`: edges leaving a shared vertex are ordered by direction (PolyClipping/Clipper2 [ec5f2d4c](https://github.com/PolyClipping/Clipper2/commit/ec5f2d4c), [#13](https://github.com/PolyClipping/Clipper2/issues/13))
 - `Engine`: an intersection outside the scanbeam is moved onto the part of the flatter edge inside it (PolyClipping/Clipper2 [4a3bf641](https://github.com/PolyClipping/Clipper2/commit/4a3bf641))
-- `Engine`: `topX` rounds the offset and then adds `bot.x`, local minima are sorted by y then x, intersections at the same point keep the order found, `checkJoinRight` uses 0.35 and `doSplitOp` keeps loops of area 1 or more, all as in C++
-- `Engine`: a closed path with only two distinct points is ignored, as in C++
-- `Engine`: `execute` into paths after `execute` into a `PolyTree` on the same clipper no longer runs in PolyTree mode
+- `Engine`: `topX` rounds the offset and then adds `bot.x`, local minima are sorted by y then x, intersections at the same point keep the order found, `checkJoinRight` uses 0.35 and `doSplitOp` keeps loops of half a unit of area or more, all as in C++
+- `Engine`: a closed path with only two distinct points is ignored, as in C++, including one given with its closing point repeated
+- `Engine`, `Offset`: `execute` into paths after `execute` into a `PolyTree` on the same clipper or `ClipperOffset` no longer runs in PolyTree mode
 - `Engine`: a `zCallback` no longer changes the caller's input points
 - `Core`: `path2ContainsPath1` follows C++ when a path only touches its parent, which fixes `PolyTree` nesting of touching paths
-- `Core`, `Clipper`, `Offset`: coordinates are rounded half away from zero, as in C++, and are never `-0`; `midPoint` uses integer division; `ellipse` truncates its default steps
+- `Core`, `Clipper`, `Offset`: coordinates are rounded half away from zero, as in C++, and are never `-0`; `midPoint` uses integer division; `ellipse` truncates its default steps, down to 3 at the least
 - `Offset`: a polygon group without a closed path no longer flips the sign of delta for later groups or decides the solution's orientation (PolyClipping/Clipper2 [6c7d0830](https://github.com/PolyClipping/Clipper2/commit/6c7d0830), [ca30bebd](https://github.com/PolyClipping/Clipper2/commit/ca30bebd), [#9](https://github.com/PolyClipping/Clipper2/issues/9))
 - `Offset`: `deltaCallback` gets the normals and arc steps of the single point path it is called for (PolyClipping/Clipper2 [6c7d0830](https://github.com/PolyClipping/Clipper2/commit/6c7d0830))
 - `Offset`: a single point in a `Polygon` or `Joined` group is offset instead of being dropped
@@ -43,7 +43,8 @@ All changes to this project will be documented in this file
 - `Offset`: **output is wound positively whatever the orientation of the input** (PolyClipping/Clipper2 [64a9ecc](https://github.com/PolyClipping/Clipper2/commit/64a9ecc), [#13](https://github.com/PolyClipping/Clipper2/issues/13)). Clockwise input used to give clockwise output; set `reverseSolution` or reverse the result to get that back
 - `Engine`: **an exception thrown during `execute` now escapes it**, as in C++, instead of being caught and returned as `false`. The clipper is still cleaned up
 - `Offset`: outers and holes are decided by exact area and containment, so a stray reversed sliver no longer flips a group; a hole that no outer encloses contributes nothing
-- `Offset`: a delta below half a unit normalizes the winding of closed paths and drops open paths; a point or line in a `Polygon` group is removed by a negative delta
+- `Offset`: a delta below half a unit normalizes the winding of closed paths and returns open paths as given; a point or line in a `Polygon` group is removed by a negative delta
+- `Offset`: removed the unused static `ClipperOffset.getLowestPathInfo` and `ClipperOffset.area`; `Clipper.area` gives the same area
 - `Offset`: arc steps follow C++, so round joins with a delta under about 16 get fewer vertices; a single point is a circle only for a round join type; a closed path of identical points is offset as a point
 - Clipping output can differ from 2.0.1-19 by one unit at intersection points. Compared with PolyClipping/Clipper2 C++ on random inputs, results are now identical in 99.9% of clipping cases (was 23%) and in all offset cases compared; the rest are holes kept by [#35](https://github.com/countertype/clipper2-ts/pull/35)
 - Tests: `Polygons.txt` and its tolerance table are synced with upstream, and upstream's regression tests for the changes above are ported

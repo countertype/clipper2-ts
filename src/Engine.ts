@@ -17,7 +17,7 @@ import {
 // BigInt constants — avoid BigInt literal syntax (0n, 4n, etc.) to sidestep
 // terser BigInt constant-folding issues in some consuming build setups.
 const B0 = BigInt(0);
-const B2 = BigInt(2);
+const B1 = BigInt(1);
 const B4 = BigInt(4);
 
 // Vertex: a pre-clipping data structure. It is used to separate polygons
@@ -434,7 +434,6 @@ export const ClipperEngine = {
       // nb: vertexList holds only each path's head vertex; the rest of the
       // chain stays reachable through the next/prev links
       let prevPt: Point64 | null = null;
-      let cnt = 0;
       for (let j = 0, len2 = path.length; j < len2; j++) {
         const pt = path[j];
         if (v0 === null) {
@@ -442,13 +441,11 @@ export const ClipperEngine = {
           vertexList.push(v0);
           prevV = v0;
           prevPt = pt;
-          cnt++;
         } else if (!(prevPt!.x === pt.x && prevPt!.y === pt.y)) { // ie skips duplicates
           const currV: Vertex = new Vertex(pt, VertexFlags.None, prevV);
           prevV!.next = currV;
           prevV = currV;
           prevPt = pt;
-          cnt++;
         }
       }
 
@@ -456,9 +453,11 @@ export const ClipperEngine = {
       if (!isOpen && prevV!.pt.x === v0!.pt.x && prevV!.pt.y === v0!.pt.y) prevV = prevV!.prev;
       prevV!.next = v0;
       v0!.prev = prevV;
-      // a closed path needs 3 vertices, as in C++ (C# let a 2 vertex path through, and
-      // crossing other paths it added area to the solution)
-      if (!isOpen && (cnt === 2 || prevV!.next === prevV)) continue;
+      // a closed path needs 3 vertices (C# let a 2 vertex path through, and crossing
+      // other paths it added area to the solution)
+      // TS: the ring is tested once its closing duplicate is gone, so [A, B, A] is
+      // skipped too, which C++ lets through
+      if (!isOpen && v0!.next === v0!.prev) continue;
 
       // OK, we have a valid path
       let goingUp: boolean;
@@ -3363,7 +3362,7 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
   // dropped. But when it lies inside the remainder it is a hole the remainder
   // already covers (the loop's -1 cancels the remainder's +1): dropping it
   // fills that hole. Keep such a loop as its own (hole) path.
-  if (absDoubleArea2 < B2) return; // area >= 1, as in C++
+  if (absDoubleArea2 < B1) return; // C++ tests this doubled area against 1 too
   const isHoleOfRemainder = !(absDoubleArea2 > absDoubleArea1) &&
     ((doubleArea2 > B0) !== (doubleArea1 > B0));
   if (isHoleOfRemainder &&

@@ -7,7 +7,7 @@
 // https://github.com/PolyClipping/Clipper2/issues/13
 import { describe, test, expect } from 'vitest';
 import {
-  Clipper, ClipperOffset, JoinType, EndType,
+  Clipper, ClipperOffset, JoinType, EndType, PolyTree64,
   type Path64, type Paths64, type PathsD,
 } from '../src';
 
@@ -434,23 +434,45 @@ describe('offset orientation (PolyClipping/Clipper2 64a9ecc)', () => {
     }
   });
 
-  test('an insignificant delta drops open paths', () => {
-    // an open path offset by less than half a unit has no width, so it must not be closed into a polygon
+  test('an insignificant delta returns open paths as given', () => {
+    // an open path offset by less than half a unit has no width, so it comes back unchanged
+    // and is not closed into a polygon
     const openPath = Clipper.makePath([200,0, 300,0, 300,100]);
     const square = Clipper.makePath([0,0, 100,0, 100,100, 0,100]);
 
     for (const endType of [EndType.Joined, EndType.Butt, EndType.Square, EndType.Round]) {
-      expect(Clipper.inflatePaths([openPath], 0.3, JoinType.Miter, endType)).toHaveLength(0);
-      expect(Clipper.inflatePaths([openPath], 0, JoinType.Miter, endType)).toHaveLength(0);
-      expect(Clipper.inflatePathsD([[{ x: 2, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 1 }]], 0, JoinType.Miter, endType))
-        .toHaveLength(0);
+      expect(Clipper.inflatePaths([openPath], 0.3, JoinType.Miter, endType)).toEqual([openPath]);
+      expect(Clipper.inflatePaths([openPath], 0, JoinType.Miter, endType)).toEqual([openPath]);
+      const openPathD = [{ x: 2, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 1 }];
+      const solutionD = Clipper.inflatePathsD([openPathD], 0, JoinType.Miter, endType);
+      expect(solutionD.map(path => path.map(pt => [pt.x, pt.y]))).toEqual([[[2, 0], [3, 0], [3, 1]]]);
 
       const co = new ClipperOffset();
       co.addPath(square, JoinType.Miter, EndType.Polygon);
       co.addPath(openPath, JoinType.Miter, endType);
       const solution: Paths64 = [];
       co.execute(0.3, solution);
-      expect(solution).toEqual(Clipper.inflatePaths([square], 0.3, JoinType.Miter, EndType.Polygon));
+      expect(solution).toEqual(
+        [...Clipper.inflatePaths([square], 0.3, JoinType.Miter, EndType.Polygon), openPath]);
+
+      // a PolyTree holds closed paths only
+      const tree = new PolyTree64();
+      co.execute(0.3, tree);
+      expect(tree.count).toBe(1);
     }
+  });
+
+  test('execute into paths after execute into a PolyTree unions the result', () => {
+    // the tree from the first call must not take the second call's union
+    const notched = Clipper.makePath([0,0, 100,0, 100,100, 60,100, 50,20, 40,100, 0,100]);
+    const expected = Clipper.inflatePaths([notched], -10, JoinType.Miter, EndType.Polygon);
+
+    const co = new ClipperOffset();
+    co.addPath(notched, JoinType.Miter, EndType.Polygon);
+    const tree = new PolyTree64();
+    co.execute(-10, tree);
+    const solution: Paths64 = [];
+    co.execute(-10, solution);
+    expect(solution).toEqual(expected);
   });
 });

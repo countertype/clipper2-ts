@@ -1100,6 +1100,9 @@ export function ellipse(center: Point64, radiusX: number, radiusY: number = 0, s
   if (radiusY <= 0) radiusY = radiusX;
   if (steps <= 2) {
     steps = Math.trunc(Math.PI * Math.sqrt((radiusX + radiusY) / 2)); // truncated, as in C++
+    // TS: C++ returns a line or a point for a radius under 1; a triangle is the least
+    // that encloses area
+    if (steps < 3) steps = 3;
   }
 
   const si = Math.sin(2 * Math.PI / steps);
@@ -1125,6 +1128,9 @@ export function ellipseD(center: PointD, radiusX: number, radiusY: number = 0, s
   if (radiusY <= 0) radiusY = radiusX;
   if (steps <= 2) {
     steps = Math.trunc(Math.PI * Math.sqrt((radiusX + radiusY) / 2)); // truncated, as in C++
+    // TS: C++ returns a line or a point for a radius under 1; a triangle is the least
+    // that encloses area
+    if (steps < 3) steps = 3;
   }
 
   const si = Math.sin(2 * Math.PI / steps);

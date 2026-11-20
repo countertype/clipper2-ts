@@ -12,7 +12,7 @@ import {
   ClipType, FillRule, PointInPolygonResult,
   Point64Utils, PointDUtils, InternalClipper
 } from './Core.js';
-import { Clipper64, PolyTree64 } from './Engine.js';
+import { Clipper64, PolyTree64, StripeIndex } from './Engine.js';
 
 export enum JoinType {
   Miter = 0,
@@ -249,64 +249,13 @@ class BoundsTree {
   }
 }
 
-// Locates points in one polygon with the same result as PointInPolygon, but visits only the
-// edges whose bounds hold the point, then those crossing the point's y to its left. The
-// even-odd parity of a point off the edges doesn't depend on which ray counts the crossings.
-class PolygonIndex {
-  private readonly polygon: Path64;
-  private readonly edges: BoundsTree;
-
-  constructor(polygon: Path64) {
-    this.polygon = polygon;
-    const cnt = polygon.length;
-    const bounds: Rect64[] = new Array<Rect64>(cnt);
-    for (let i = 0; i < cnt; i++) {
-      const a = polygon[i];
-      const b = polygon[(i + 1 === cnt) ? 0 : i + 1];
-      bounds[i] = {
-        left: Math.min(a.x, b.x), top: Math.min(a.y, b.y),
-        right: Math.max(a.x, b.x), bottom: Math.max(a.y, b.y)
-      };
-    }
-    this.edges = new BoundsTree(bounds);
-  }
-
-  public locate(pt: Point64): PointInPolygonResult {
-    const polygon = this.polygon;
-    const cnt = polygon.length;
-    let isOn = false;
-
-    this.edges.query(
-      (r) => !isOn && r.left <= pt.x && r.right >= pt.x && r.top <= pt.y && r.bottom >= pt.y,
-      (i) => {
-        isOn = InternalClipper.crossProductSign(polygon[i], polygon[(i + 1 === cnt) ? 0 : i + 1], pt) === 0;
-      });
-
-    if (isOn) return PointInPolygonResult.IsOn;
-
-    // with a half-open rule, an edge lying along the ray never crosses it
-    let inside = false;
-
-    this.edges.query(
-      (r) => r.left <= pt.x && r.top <= pt.y && r.bottom > pt.y,
-      (i) => {
-        const a = polygon[i];
-        const b = polygon[(i + 1 === cnt) ? 0 : i + 1];
-        const d = InternalClipper.crossProductSign(a, b, pt);
-        if ((a.y > pt.y) !== (b.y > pt.y) && ((a.y < b.y) ? d < 0 : d > 0)) inside = !inside;
-      });
-
-    return inside ? PointInPolygonResult.IsInside : PointInPolygonResult.IsOutside;
-  }
-}
-
 // Locates points in a set of polygons. A large polygon gets an edge index on its first use, since
 // many small paths may be tested against it.
 class PolygonLocator {
-  private readonly indexes: (PolygonIndex | undefined)[];
+  private readonly indexes: (StripeIndex | undefined)[];
 
   constructor(count: number) {
-    this.indexes = new Array<PolygonIndex | undefined>(count);
+    this.indexes = new Array<StripeIndex | undefined>(count);
   }
 
   public locate(pt: Point64, polygon: Path64, polygonIdx: number): PointInPolygonResult {
@@ -314,10 +263,12 @@ class PolygonLocator {
 
     let index = this.indexes[polygonIdx];
     if (index === undefined) {
-      index = new PolygonIndex(polygon);
+      index = new StripeIndex();
+      index.buildFromPath(polygon);
       this.indexes[polygonIdx] = index;
     }
-    return index.locate(pt);
+    // an empty index is one that declined the polygon
+    return index.empty ? InternalClipper.pointInPolygon(pt, polygon) : index.pointInPolygon(pt);
   }
 }
 
@@ -445,14 +396,6 @@ export class ClipperOffset {
   public addPaths(paths: Paths64, joinType: JoinType, endType: EndType): void {
     if (paths.length === 0) return;
     this.groupList.push(new Group(paths, joinType, endType));
-  }
-
-  private calcSolutionCapacity(): number {
-    let result = 0;
-    for (const g of this.groupList) {
-      result += (g.endType === EndType.Joined) ? g.inPaths.length * 2 : g.inPaths.length;
-    }
-    return result;
   }
 
   private setGroupOrientations(): void {
@@ -585,7 +528,11 @@ export class ClipperOffset {
 
       // a hole with a vertex inside an outer counts as enclosed, so one poking out still cuts it
       const ownOuter = outerRefs[groupIdx];
-      let isEnclosed = isOuter(ownOuter) && hasVertexInside(path, locateIn(ownOuter));
+      const ob = bounds[ownOuter];
+      let isEnclosed = isOuter(ownOuter) &&
+        Math.max(ob.left, pb.left) <= Math.min(ob.right, pb.right) &&
+        Math.max(ob.top, pb.top) <= Math.min(ob.bottom, pb.bottom) &&
+        hasVertexInside(path, locateIn(ownOuter));
 
       if (!isEnclosed) {
         getTree().query(
@@ -624,10 +571,16 @@ export class ClipperOffset {
     this.setGroupOrientations();
 
     // make sure the offset delta is significant
+    // TS: an open path has no width at an insignificant delta, so it is returned as it
+    // was given, without the union that would close it into a polygon
+    const openPaths: Paths64 = [];
+
     if (Math.abs(delta) < 0.5) {
       for (const group of this.groupList) {
-        // an open path is only as wide as its delta, so an insignificant delta leaves nothing
-        if (group.endType !== EndType.Polygon) continue;
+        if (group.endType !== EndType.Polygon) {
+          for (const path of group.inPaths) openPaths.push(path);
+          continue;
+        }
 
         for (let i = 0; i < group.inPaths.length; i++) {
           if (group.isStrayPath(i)) continue;
@@ -645,19 +598,24 @@ export class ClipperOffset {
       }
     }
 
-    if (this.solution.length === 0) return;
+    if (this.solution.length > 0) {
+      // clean up self-intersections ...
+      const c = new Clipper64();
+      this.initClipper(c);
+      c.reverseSolution = this.reverseSolution;
+      c.addSubject(this.solution);
 
-    // clean up self-intersections ...
-    const c = new Clipper64();
-    this.initClipper(c);
-    c.reverseSolution = this.reverseSolution;
-    c.addSubject(this.solution);
+      // outers are wound positively, whatever the orientation of the input
+      if (this.solutionTree !== null) {
+        c.execute(ClipType.Union, FillRule.Positive, this.solutionTree);
+      } else {
+        c.execute(ClipType.Union, FillRule.Positive, this.solution);
+      }
+    }
 
-    // outers are wound positively, whatever the orientation of the input
-    if (this.solutionTree !== null) {
-      c.execute(ClipType.Union, FillRule.Positive, this.solutionTree);
-    } else {
-      c.execute(ClipType.Union, FillRule.Positive, this.solution);
+    // nb: a PolyTree64 holds closed paths only, so these go to a paths solution alone
+    if (this.solutionTree === null) {
+      for (const path of openPaths) this.solution.push(path);
     }
   }
 
@@ -669,6 +627,7 @@ export class ClipperOffset {
       const solution = solutionOrTree;
       solution.length = 0;
       this.solution = solution;
+      this.solutionTree = null; // a tree from an earlier execute must not take this result
       this.executeInternal(delta);
     } else {
       // PolyTree64 version
@@ -695,28 +654,6 @@ export class ClipperOffset {
       x: dy * f,
       y: -dx * f
     };
-  }
-
-  public static getLowestPathInfo(paths: Paths64): { idx: number; isNegArea: boolean } {
-    let idx = -1;
-    let isNegArea = false;
-    const botPt: Point64 = { x: Number.MAX_SAFE_INTEGER, y: Number.MIN_SAFE_INTEGER };
-    
-    for (let i = 0; i < paths.length; ++i) {
-      let a = Number.MAX_VALUE;
-      for (const pt of paths[i]) {
-        if ((pt.y < botPt.y) || ((pt.y === botPt.y) && (pt.x >= botPt.x))) continue;
-        if (a === Number.MAX_VALUE) {
-          a = ClipperOffset.area(paths[i]);
-          if (a === 0) break; // invalid closed path so break from inner loop
-          isNegArea = a < 0;
-        }
-        idx = i;
-        botPt.x = pt.x;
-        botPt.y = pt.y;
-      }
-    }
-    return { idx, isNegArea };
   }
 
   private static translatePoint(pt: PointD, dx: number, dy: number): PointD {
@@ -1172,10 +1109,6 @@ export class ClipperOffset {
     return result;
   }
 
-  public static area(path: Path64): number {
-    return InternalClipper.area(path);
-  }
-
   public static sqr(val: number): number {
     return val * val;
   }
@@ -1185,6 +1118,9 @@ export class ClipperOffset {
     if (radiusY <= 0) radiusY = radiusX;
     if (steps <= 2) {
       steps = Math.trunc(Math.PI * Math.sqrt((radiusX + radiusY) / 2)); // truncated, as in C++
+      // TS: C++ returns a line or a point for a radius under 1; a triangle is the least
+      // that encloses area
+      if (steps < 3) steps = 3;
     }
 
     const si = Math.sin(2 * Math.PI / steps);
