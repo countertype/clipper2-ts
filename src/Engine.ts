@@ -334,6 +334,8 @@ export class OutRec {
   public recursiveSplit: OutRec | null = null;
   // Lazily built during PolyTree nesting; only valid once pts is stable.
   public pipIndex: StripeIndex | null = null;
+  // Cleaned copy of pts for the containment fallback; same lifetime as pipIndex.
+  public cleanPath: Path64 | null = null;
 }
 
 export class HorzSegment {
@@ -1707,7 +1709,9 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     } while (op !== outrec.pts);
   }
 
-  protected path1InsidePath2(op1: OutPt, op2: OutPt): boolean {
+  // 'owner' is given only during PolyTree nesting, when op2 is owner.pts and
+  // the ring no longer changes, so its cleaned path can be kept on the owner.
+  protected path1InsidePath2(op1: OutPt, op2: OutPt, owner?: OutRec): boolean {
     // we need to make some accommodation for rounding errors
     // so we won't jump if the first vertex is found outside
     let pip = PointInPolygonResult.IsOn;
@@ -1728,14 +1732,25 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       op = op.next!;
     } while (op !== op1);
     // result is unclear, so try again using cleaned paths
-    return InternalClipper.path2ContainsPath1(this.getCleanPath(op1), this.getCleanPath(op2)); // (#973)
+    const clean2 = owner !== undefined ? this.ownerCleanPath(owner) : this.getCleanPath(op2);
+    return InternalClipper.path2ContainsPath1(this.getCleanPath(op1), clean2); // (#973)
+  }
+
+  // Cleaning a large owner once per touching hole dominated PolyTree nesting.
+  private ownerCleanPath(owner: OutRec): Path64 {
+    let path = owner.cleanPath;
+    if (path === null) {
+      path = this.getCleanPath(owner.pts!);
+      owner.cleanPath = path;
+    }
+    return path;
   }
 
   // path1InsidePath2 variant using a StripeIndex cached on the owner. Small owners
   // and the ambiguity fallback defer to the brute-force version, so results match.
   protected path1InsideOwner(op1: OutPt, owner: OutRec): boolean {
     if (owner.path.length <= this.pipIndexThreshold) {
-      return this.path1InsidePath2(op1, owner.pts!);
+      return this.path1InsidePath2(op1, owner.pts!, owner);
     }
 
     let index = owner.pipIndex;
@@ -1746,7 +1761,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     }
 
     // Empty means the index declined this ring (see StripeIndex.build).
-    if (index.empty) return this.path1InsidePath2(op1, owner.pts!);
+    if (index.empty) return this.path1InsidePath2(op1, owner.pts!, owner);
 
     let pip = PointInPolygonResult.IsOn;
     let op = op1;
@@ -1767,7 +1782,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     } while (op !== op1);
 
     // ambiguous, defer to the exact cleaned-path test
-    return InternalClipper.path2ContainsPath1(this.getCleanPath(op1), this.getCleanPath(owner.pts!)); // (#973)
+    return InternalClipper.path2ContainsPath1(this.getCleanPath(op1), this.ownerCleanPath(owner)); // (#973)
   }
 
   private pointInOpPolygon(pt: Point64, op: OutPt): PointInPolygonResult {

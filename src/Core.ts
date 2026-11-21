@@ -622,6 +622,90 @@ function icPointInPolygon(pt: Point64, polygon: Path64): PointInPolygonResult {
   return val === 0 ? PointInPolygonResult.IsOutside : PointInPolygonResult.IsInside;
 }
 
+// The sum of two coordinates up to this size is exact in a double.
+const maxMidpointCoord = maxSafeInteger / 4;
+
+// icPointInPolygon for a point given in doubled coordinates (px, py) against a
+// polygon that is not doubled, so the midpoint of an integer segment can be
+// tested without rounding. It follows icPointInPolygon line for line with the
+// polygon's coordinates doubled as they are read; keep the two in step.
+function pointInPolygon2x(px: number, py: number, polygon: Path64): PointInPolygonResult {
+  const len = polygon.length;
+  let start = 0;
+  if (len < 3) return PointInPolygonResult.IsOutside;
+
+  while (start < len && polygon[start].y * 2 === py) start++;
+  if (start === len) return PointInPolygonResult.IsOutside;
+
+  let isAbove = polygon[start].y * 2 < py;
+  const startingAbove = isAbove;
+  let val = 0;
+  let i = start + 1;
+  let end = len;
+
+  while (true) {
+    if (i === end) {
+      if (end === 0 || start === 0) break;
+      end = start;
+      i = 0;
+    }
+
+    if (isAbove) {
+      while (i < end && polygon[i].y * 2 < py) i++;
+    } else {
+      while (i < end && polygon[i].y * 2 > py) i++;
+    }
+
+    if (i === end) continue;
+
+    const curr = polygon[i];
+    const prev = i > 0 ? polygon[i - 1] : polygon[len - 1];
+    const currX = curr.x * 2, currY = curr.y * 2;
+    const prevX = prev.x * 2;
+
+    if (currY === py) {
+      if (currX === px || (curr.y === prev.y &&
+        ((px < prevX) !== (px < currX)))) {
+        return PointInPolygonResult.IsOn;
+      }
+      i++;
+      if (i === start) break;
+      continue;
+    }
+
+    if (px < currX && px < prevX) {
+      // we're only interested in edges crossing on the left
+    } else if (px > prevX && px > currX) {
+      val = 1 - val; // toggle val
+    } else {
+      const cps = crossProductSign2x(prev, curr, px, py);
+      if (cps === 0) return PointInPolygonResult.IsOn;
+      if ((cps < 0) === isAbove) val = 1 - val;
+    }
+    isAbove = !isAbove;
+    i++;
+  }
+
+  if (isAbove === startingAbove) {
+    return val === 0 ? PointInPolygonResult.IsOutside : PointInPolygonResult.IsInside;
+  }
+
+  if (i === len) i = 0;
+  const cps = i === 0 ?
+    crossProductSign2x(polygon[len - 1], polygon[0], px, py) :
+    crossProductSign2x(polygon[i - 1], polygon[i], px, py);
+  if (cps === 0) return PointInPolygonResult.IsOn;
+  if ((cps < 0) === isAbove) val = 1 - val;
+  return val === 0 ? PointInPolygonResult.IsOutside : PointInPolygonResult.IsInside;
+}
+
+// Sign of the cross product of (pt2 - pt1) and ((px, py) - 2 * pt2), which is
+// the sign crossProductSign gives for pt1 and pt2 doubled. Passing
+// (px, py) - pt2 as the third point makes crossProductSign form those vectors.
+function crossProductSign2x(pt1: Point64, pt2: Point64, px: number, py: number): number {
+  return crossProductSign(pt1, pt2, { x: px - pt2.x, y: py - pt2.y });
+}
+
 function path2ContainsPath1(path1: Path64, path2: Path64): boolean {
   // we need to make some accommodation for rounding errors
   // so we won't jump if the first vertex is found outside
@@ -640,11 +724,32 @@ function path2ContainsPath1(path1: Path64, path2: Path64): boolean {
         break;
     }
   }
-  if (pip !== PointInPolygonResult.IsInside) return false;
-  // result is likely true but check midpoint
-  // (as in C++: the midpoint must be inside, not just on the edge, and it is
-  // taken by integer division, which truncates toward zero)
+  // Undecided: every vertex is on path2, or a lone vertex is off it.
+  // Upstream differs here. C++ returns false unless a vertex was inside, which
+  // leaves a hole that touches its owner at every vertex un-nested. C# accepts
+  // a bounds midpoint that is inside or on path2, which nests rings that only
+  // share an edge with path2 (upstream #957). The midpoints of path1's edges
+  // settle both cases, so they are tested before the bounds midpoint.
   const mp = icGetBounds(path1);
+  if (Math.abs(mp.left) <= maxMidpointCoord && Math.abs(mp.right) <= maxMidpointCoord &&
+      Math.abs(mp.top) <= maxMidpointCoord && Math.abs(mp.bottom) <= maxMidpointCoord) {
+    const needTwo = pip !== PointInPolygonResult.IsOn;
+    let mid = PointInPolygonResult.IsOn;
+    for (let i = 0, j = path1.length - 1; i < path1.length; j = i++) {
+      const r = pointInPolygon2x(path1[j].x + path1[i].x, path1[j].y + path1[i].y, path2);
+      if (r === PointInPolygonResult.IsOn) continue;
+      // with every vertex on path2, one midpoint off it decides;
+      // otherwise two that agree, as in the vertex loop
+      if (!needTwo || r === mid) return r === PointInPolygonResult.IsInside;
+      mid = r;
+    }
+    // a lone vertex stands unless a lone midpoint contradicts it
+    if (needTwo && (mid === PointInPolygonResult.IsOn || mid === pip)) {
+      return pip === PointInPolygonResult.IsInside;
+    }
+  }
+  // still undecided, check the bounds midpoint
+  // (taken by integer division, which truncates toward zero, as in C++)
   let midX: number, midY: number;
   if (Number.isSafeInteger(mp.left) && Number.isSafeInteger(mp.right) &&
       Math.abs(mp.left) + Math.abs(mp.right) > Number.MAX_SAFE_INTEGER) {
@@ -655,7 +760,7 @@ function path2ContainsPath1(path1: Path64, path2: Path64): boolean {
     midY = Math.trunc((mp.top + mp.bottom) / 2);
   }
   const midPt: Point64 = { x: midX, y: midY };
-  return icPointInPolygon(midPt, path2) === PointInPolygonResult.IsInside;
+  return icPointInPolygon(midPt, path2) !== PointInPolygonResult.IsOutside;
 }
 
 // Plain const object replaces the namespace. External callers use InternalClipper.foo()
@@ -696,6 +801,7 @@ export const InternalClipper = {
   getBounds: icGetBounds,
   getClosestPtOnSegment,
   pointInPolygon: icPointInPolygon,
+  pointInPolygon2x,
   path2ContainsPath1,
 }
 

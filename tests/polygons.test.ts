@@ -274,9 +274,11 @@ describe('Comprehensive Polygon Clipping Tests', () => {
     expect(Clipper.areaPaths(Clipper.union(paths.slice(0, 2), FillRule.Positive))).toBe(2072202.5);
   });
 
-  test('a path that only touches another is not nested inside it, as in C++', () => {
-    // the small triangle shares all three vertices with the larger hole. Its
-    // midpoint is not strictly inside that hole, so both are holes of the outer
+  test('an island that touches its hole at every vertex is nested inside it', () => {
+    // the small triangle shares all three vertices with the larger hole and
+    // lies inside it. C++ makes both holes of the outer, which leaves a hole
+    // with positive area; the midpoints of the triangle's edges are inside
+    // the larger hole, so here it is an island of that hole
     const subject: Paths64 = [
       Clipper.makePath([-6,-2, -3,-8, -10,11, -9,4]),
       Clipper.makePath([-10,8, 4,4, -15,4, -12,-13, 9,-15, 6,10, 4,-10]),
@@ -286,11 +288,14 @@ describe('Comprehensive Polygon Clipping Tests', () => {
     Clipper.booleanOpWithPolyTree(ClipType.Xor, subject, null, tree, FillRule.NonZero);
     expect(tree.count).toBe(1);
     const outer = tree.child(0);
-    expect(outer.count).toBe(2);
-    expect(outer.child(0).isHole).toBe(true);
-    expect(outer.child(0).count).toBe(0);
-    expect(outer.child(1).isHole).toBe(true);
-    expect(outer.child(1).polygon!.map(pt => [pt.x, pt.y])).toEqual([[-4, 4], [-9, 8], [-7, 4]]);
+    expect(outer.count).toBe(1);
+    const hole = outer.child(0);
+    expect(hole.isHole).toBe(true);
+    expect(hole.count).toBe(1);
+    const island = hole.child(0);
+    expect(island.isHole).toBe(false);
+    expect(island.polygon!.map(pt => [pt.x, pt.y])).toEqual([[-4, 4], [-9, 8], [-7, 4]]);
+    expect(Clipper.area(island.polygon!)).toBeGreaterThan(0);
   });
 
   test('midpoints are taken by integer division, as in C++', () => {
