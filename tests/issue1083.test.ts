@@ -46,9 +46,10 @@ function segmentsIntersectProper(
 }
 
 describe('Clipper2 issue #1083 (union should yield simple polygons)', () => {
-  // Known failure, open upstream and in this port: the output contains a
-  // 6-vertex ring that crosses itself. Remove `.fails` once it is fixed.
-  it.fails('every output path is free of self-intersections', () => {
+  // The output used to contain a 6-vertex ring that crossed itself. It no
+  // longer does since intersection points are rounded instead of truncated
+  // (PolyClipping/Clipper2 f774daf).
+  it('every output path is free of self-intersections', () => {
     expect(issue1083FlatXY.length).toBe(600);
 
     const polygon = Clipper.makePath([...issue1083FlatXY]);

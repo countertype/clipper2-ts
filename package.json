@@ -1,6 +1,6 @@
 {
   "name": "clipper2-ts",
-  "version": "2.0.1-19",
+  "version": "2.0.1-20",
   "description": "TypeScript port of Clipper2 polygon clipping, boolean operations, offsetting, and triangulation library",
   "type": "module",
   "main": "dist/index.js",
@@ -72,6 +72,8 @@
   "files": [
     "dist/**/*",
     "src/**/*",
+    "!dist/cdt",
+    "!src/cdt",
     "README.md",
     "LICENSE"
   ],

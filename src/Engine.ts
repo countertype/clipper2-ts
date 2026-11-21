@@ -17,7 +17,7 @@ import {
 // BigInt constants — avoid BigInt literal syntax (0n, 4n, etc.) to sidestep
 // terser BigInt constant-folding issues in some consuming build setups.
 const B0 = BigInt(0);
-const B2 = BigInt(2);
+const B1 = BigInt(1);
 const B4 = BigInt(4);
 
 // Vertex: a pre-clipping data structure. It is used to separate polygons
@@ -163,6 +163,163 @@ export enum JoinWith { None, Left, Right }
 export enum HorzPosition { Bottom, Middle, Top }
 
 // OutRec: path data structure for clipping solutions
+// Buckets a ring's edges into horizontal Y stripes so a PIP query only scans the
+// stripe spanning pt.y (~O(sqrt n) vs O(n)). After KiCad's POLY_YSTRIPES_INDEX.
+export class StripeIndex {
+  private edgeA: Point64[] = [];
+  private edgeB: Point64[] = [];
+  private stripes: number[][] = [];
+  private yMin: number = 0;
+  private stripeHeight: number = 1;
+  private stripeCount: number = 1;
+
+  public get edgeCount(): number { return this.edgeA.length; }
+  public get empty(): boolean { return this.edgeA.length === 0; }
+
+  // nb: only needs to be monotonic in y, which it is even where the subtraction
+  // rounds, since an edge and a point between its ends then land in stripes in order
+  private yToStripe(y: number): number {
+    const s = Math.trunc((y - this.yMin) / this.stripeHeight);
+    if (s < 0) return 0;
+    if (s >= this.stripeCount) return this.stripeCount - 1;
+    return s;
+  }
+
+  private build(edgeA: Point64[], edgeB: Point64[]): void {
+    this.edgeA = edgeA;
+    this.edgeB = edgeB;
+    this.stripes = [];
+    const cnt = edgeA.length;
+
+    if (cnt === 0) {
+      this.yMin = 0;
+      this.stripeHeight = 1;
+      this.stripeCount = 1;
+      return;
+    }
+
+    let yMin = edgeA[0].y;
+    let yMax = yMin;
+    for (let i = 0; i < cnt; i++) {
+      const ay = edgeA[i].y, by = edgeB[i].y;
+      if (ay < yMin) yMin = ay;
+      if (by < yMin) yMin = by;
+      if (ay > yMax) yMax = ay;
+      if (by > yMax) yMax = by;
+    }
+    this.yMin = yMin;
+
+    // Brute force calls every point outside a zero-height ring, even one on the ring,
+    // so decline it rather than answer IsOn.
+    if (yMax === yMin) {
+      this.edgeA = [];
+      this.edgeB = [];
+      return;
+    }
+
+    let stripeCount = Math.trunc(Math.sqrt(cnt));
+    if (stripeCount < 1) stripeCount = 1;
+    if (stripeCount > 65536) stripeCount = 65536;
+    this.stripeCount = stripeCount;
+    this.stripeHeight = Math.max(1, Math.floor((yMax - yMin + stripeCount - 1) / stripeCount));
+
+    // Decline rings whose edges each span many stripes (tall "comb" edges); indexing
+    // loses to brute force there. An empty index signals the fallback to callers.
+    let totalRefs = 0;
+    for (let i = 0; i < cnt; i++) {
+      const ay = edgeA[i].y, by = edgeB[i].y;
+      totalRefs += this.yToStripe(ay > by ? ay : by) - this.yToStripe(ay < by ? ay : by) + 1;
+    }
+
+    if (totalRefs > cnt * 8) {
+      this.edgeA = [];
+      this.edgeB = [];
+      return;
+    }
+
+    const stripes: number[][] = new Array<number[]>(stripeCount);
+    for (let s = 0; s < stripeCount; s++) stripes[s] = [];
+
+    for (let i = 0; i < cnt; i++) {
+      const ay = edgeA[i].y, by = edgeB[i].y;
+      const sMin = this.yToStripe(ay < by ? ay : by);
+      const sMax = this.yToStripe(ay > by ? ay : by);
+      for (let s = sMin; s <= sMax; s++) stripes[s].push(i);
+    }
+    this.stripes = stripes;
+  }
+
+  public buildFromPath(path: Path64): void {
+    const edgeA: Point64[] = [];
+    const edgeB: Point64[] = [];
+    const cnt = path.length;
+
+    if (cnt >= 3) {
+      for (let i = 0, j = cnt - 1; i < cnt; j = i++) {
+        if (path[j].x !== path[i].x || path[j].y !== path[i].y) {
+          edgeA.push(path[j]);
+          edgeB.push(path[i]);
+        }
+      }
+    }
+    this.build(edgeA, edgeB);
+  }
+
+  public buildFromRing(op: OutPt | null): void {
+    const edgeA: Point64[] = [];
+    const edgeB: Point64[] = [];
+
+    if (op !== null && op.next !== op && op.prev !== op.next) {
+      let cur = op;
+      do {
+        const nxt = cur.next!;
+        if (cur.pt.x !== nxt.pt.x || cur.pt.y !== nxt.pt.y) {
+          edgeA.push(cur.pt);
+          edgeB.push(nxt.pt);
+        }
+        cur = nxt;
+      } while (cur !== op);
+    }
+    this.build(edgeA, edgeB);
+  }
+
+  public pointInPolygon(pt: Point64): PointInPolygonResult {
+    if (this.edgeA.length === 0) return PointInPolygonResult.IsOutside;
+
+    const stripe = this.stripes[this.yToStripe(pt.y)];
+    const edgeA = this.edgeA, edgeB = this.edgeB;
+    const px = pt.x, py = pt.y;
+    let inside = false;
+
+    for (let k = 0, len = stripe.length; k < len; k++) {
+      const a = edgeA[stripe[k]];
+      const b = edgeB[stripe[k]];
+
+      // TS: an edge wholly above or below the point can neither hold it nor cross its
+      // level, so the cross product (which may need BigInt) is only taken for the rest
+      const aAbove = a.y > py, bAbove = b.y > py;
+      if (aAbove === bAbove && a.y !== py && b.y !== py) continue;
+
+      const cross = InternalClipper.crossProductSign(a, b, pt);
+
+      // On-segment needs the bbox check; collinear (cross == 0) alone catches points
+      // on the edge's infinite line but off the segment.
+      if (cross === 0 &&
+        px >= (a.x < b.x ? a.x : b.x) && px <= (a.x > b.x ? a.x : b.x) &&
+        py >= (a.y < b.y ? a.y : b.y) && py <= (a.y > b.y ? a.y : b.y)) {
+        return PointInPolygonResult.IsOn;
+      }
+
+      // Half-open crossing so horizontal edges never affect parity (IsOn only).
+      if (aAbove !== bAbove) {
+        if (bAbove ? cross > 0 : cross < 0) inside = !inside;
+      }
+    }
+
+    return inside ? PointInPolygonResult.IsInside : PointInPolygonResult.IsOutside;
+  }
+}
+
 export class OutRec {
   public idx: number = 0;
   public owner: OutRec | null = null;
@@ -175,6 +332,10 @@ export class OutRec {
   public isOpen: boolean = false;
   public splits: number[] | null = null;
   public recursiveSplit: OutRec | null = null;
+  // Lazily built during PolyTree nesting; only valid once pts is stable.
+  public pipIndex: StripeIndex | null = null;
+  // Cleaned copy of pts for the containment fallback; same lifetime as pipIndex.
+  public cleanPath: Path64 | null = null;
 }
 
 export class HorzSegment {
@@ -210,8 +371,9 @@ function compareHorzSegments(hs1: HorzSegment, hs2: HorzSegment): number {
 function compareIntersectNodes(a: IntersectNode, b: IntersectNode): number {
   if (a.pt.y !== b.pt.y) return (a.pt.y > b.pt.y) ? -1 : 1;
   if (a.pt.x !== b.pt.x) return (a.pt.x < b.pt.x) ? -1 : 1;
-  if (a.edge1.curX !== b.edge1.curX) return (a.edge1.curX < b.edge1.curX) ? -1 : 1;
-  return (a.edge2.curX < b.edge2.curX) ? -1 : (a.edge2.curX > b.edge2.curX) ? 1 : 0;
+  // intersections at the same point keep the order they were found in, as in C++
+  // (Array.prototype.sort is stable); their order changes the output
+  return 0;
 }
 
 ///////////////////////////////////////////////////////////////////
@@ -288,12 +450,14 @@ export const ClipperEngine = {
           prevPt = pt;
         }
       }
-      
+
       if (prevV?.prev == null) continue;
       if (!isOpen && prevV!.pt.x === v0!.pt.x && prevV!.pt.y === v0!.pt.y) prevV = prevV!.prev;
       prevV!.next = v0;
       v0!.prev = prevV;
-      if (!isOpen && prevV!.next === prevV) continue;
+      // a closed path needs 3 vertices
+      // TS: tested after the closing duplicate is dropped, so [A, B, A] is skipped too
+      if (!isOpen && v0!.next === v0!.prev) continue;
 
       // OK, we have a valid path
       let goingUp: boolean;
@@ -571,6 +735,10 @@ export class ClipperBase {
 
   public preserveCollinear: boolean = true;
   public reverseSolution: boolean = false;
+  // Ring edge count below which a StripeIndex does not pay off when nesting a PolyTree;
+  // brute force instead. 64 is upstream's empirical break-even. Also a testing knob:
+  // high forces brute-force nesting, low forces stripe indexing.
+  public pipIndexThreshold: number = 64;
 
   constructor() {}
 
@@ -584,9 +752,14 @@ export class ClipperBase {
     return pt1.x === pt2.x && pt1.y === pt2.y;
   }
 
-  private setZ(ae1: Active, ae2: Active, intersectPt: Point64): void {
+  private setZ(ae1: Active, ae2: Active, op: OutPt): void {
     const zCallback = this.zCallbackInternal;
     if (!zCallback) return;
+
+    // TS: points are shared with the input, not copied as in C++, so the output
+    // point gets its own copy before z is written
+    const intersectPt: Point64 = { x: op.pt.x, y: op.pt.y, z: 0 };
+    op.pt = intersectPt;
 
     // prioritize subject vertices over clip vertices
     // and pass the subject vertices before clip vertices in the callback
@@ -679,8 +852,10 @@ private static topX(ae: Active, currentY: number): number {
   if ((currentY === ae.top.y) || (ae.top.x === ae.bot.x)) return ae.top.x;
   if (currentY === ae.bot.y) return ae.bot.x;
 
-  // use MidpointRounding.ToEven in order to explicitly match the nearbyint behaviour on the C++ side
-  return InternalClipper.roundToEven(ae.bot.x + ae.dx * (currentY - ae.bot.y));
+  // use MidpointRounding.ToEven in order to explicitly match the nearbyint behaviour on the C++ side.
+  // The offset is rounded and then added to bot.x, as in C++ and C#: rounding the sum
+  // resolves an exact half differently when bot.x is odd
+  return ae.bot.x + InternalClipper.roundToEven(ae.dx * (currentY - ae.bot.y));
 }
 
   private static isHorizontal(ae: Active): boolean {
@@ -773,7 +948,9 @@ private static topX(ae: Active, currentY: number): number {
 
   protected reset(): void {
     if (!this.isSortedMinimaList) {
-      this.minimaList.sort((a, b) => b.vertex.pt.y - a.vertex.pt.y);
+      // by descending y, then ascending x as in C++ (#594)
+      this.minimaList.sort((a, b) =>
+        (b.vertex.pt.y - a.vertex.pt.y) || (a.vertex.pt.x - b.vertex.pt.x));
       this.isSortedMinimaList = true;
     }
 
@@ -961,6 +1138,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
   private insertLocalMinimaIntoAEL(botY: number): void {
     // Add any local minima (if any) at BotY ...
     // NB horizontal local minima edges should contain locMin.vertex.prev
+    let prevLeft: Active | null = null;
     while (this.hasLocMinAtY(botY)) {
       const localMinima = this.popLocalMinima();
       let leftBound: Active | null;
@@ -1023,7 +1201,10 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
 
       let contributing: boolean;
       leftBound!.isLeftBound = true;
-      this.insertLeftEdge(leftBound!);
+      // minima at one y come in ascending x, so the last left bound is a place to start from
+      this.insertLeftEdge(leftBound!,
+        prevLeft !== null && prevLeft.curX < leftBound!.curX ? prevLeft : null);
+      prevLeft = leftBound;
 
       if (!ClipperBase.openPathsEnabled) {
         // Closed-path-only fast path.
@@ -1528,7 +1709,9 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     } while (op !== outrec.pts);
   }
 
-  protected path1InsidePath2(op1: OutPt, op2: OutPt): boolean {
+  // 'owner' is given only during PolyTree nesting, when op2 is owner.pts and
+  // the ring no longer changes, so its cleaned path can be kept on the owner.
+  protected path1InsidePath2(op1: OutPt, op2: OutPt, owner?: OutRec): boolean {
     // we need to make some accommodation for rounding errors
     // so we won't jump if the first vertex is found outside
     let pip = PointInPolygonResult.IsOn;
@@ -1549,7 +1732,57 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       op = op.next!;
     } while (op !== op1);
     // result is unclear, so try again using cleaned paths
-    return InternalClipper.path2ContainsPath1(this.getCleanPath(op1), this.getCleanPath(op2)); // (#973)
+    const clean2 = owner !== undefined ? this.ownerCleanPath(owner) : this.getCleanPath(op2);
+    return InternalClipper.path2ContainsPath1(this.getCleanPath(op1), clean2); // (#973)
+  }
+
+  // Cleaning a large owner once per touching hole dominated PolyTree nesting.
+  private ownerCleanPath(owner: OutRec): Path64 {
+    let path = owner.cleanPath;
+    if (path === null) {
+      path = this.getCleanPath(owner.pts!);
+      owner.cleanPath = path;
+    }
+    return path;
+  }
+
+  // path1InsidePath2 variant using a StripeIndex cached on the owner. Small owners
+  // and the ambiguity fallback defer to the brute-force version, so results match.
+  protected path1InsideOwner(op1: OutPt, owner: OutRec): boolean {
+    if (owner.path.length <= this.pipIndexThreshold) {
+      return this.path1InsidePath2(op1, owner.pts!, owner);
+    }
+
+    let index = owner.pipIndex;
+    if (index === null) {
+      index = new StripeIndex();
+      index.buildFromRing(owner.pts);
+      owner.pipIndex = index;
+    }
+
+    // Empty means the index declined this ring (see StripeIndex.build).
+    if (index.empty) return this.path1InsidePath2(op1, owner.pts!, owner);
+
+    let pip = PointInPolygonResult.IsOn;
+    let op = op1;
+    do {
+      switch (index.pointInPolygon(op.pt)) {
+        case PointInPolygonResult.IsOutside:
+          if (pip === PointInPolygonResult.IsOutside) return false;
+          pip = PointInPolygonResult.IsOutside;
+          break;
+        case PointInPolygonResult.IsInside:
+          if (pip === PointInPolygonResult.IsInside) return true;
+          pip = PointInPolygonResult.IsInside;
+          break;
+        default:
+          break;
+      }
+      op = op.next!;
+    } while (op !== op1);
+
+    // ambiguous, defer to the exact cleaned-path test
+    return InternalClipper.path2ContainsPath1(this.getCleanPath(op1), this.ownerCleanPath(owner)); // (#973)
   }
 
   private pointInOpPolygon(pt: Point64, op: OutPt): PointInPolygonResult {
@@ -1839,6 +2072,27 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     }
     this.insertScanline(ae.top.y);
 
+    // rounded TopX values can hide a wrong order between edges leaving a shared
+    // vertex, so restore their order here rather than crossing them further on
+    const bot = ae.bot;
+    let prev = ae.prevInAEL;
+    while (prev !== null && prev.bot.x === bot.x && prev.bot.y === bot.y &&
+      !ClipperBase.isHorizontal(prev) &&
+      InternalClipper.crossProductSign(prev.top, bot, ae.top) > 0) {
+      this.intersectEdges(prev, ae, bot);
+      this.swapPositionsInAEL(prev, ae);
+      prev = ae.prevInAEL;
+    }
+
+    let next = ae.nextInAEL;
+    while (next !== null && next.bot.x === bot.x && next.bot.y === bot.y &&
+      !ClipperBase.isHorizontal(next) &&
+      InternalClipper.crossProductSign(next.top, bot, ae.top) < 0) {
+      this.intersectEdges(ae, next, bot);
+      this.swapPositionsInAEL(ae, next);
+      next = ae.nextInAEL;
+    }
+
     this.checkJoinLeft(ae, ae.bot);
     this.checkJoinRight(ae, ae.bot, true); // (#500)
   }
@@ -1880,16 +2134,17 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       const absDx1 = Math.abs(ae1.dx);
       const absDx2 = Math.abs(ae2.dx);
       
-      if (absDx1 > 100 && absDx2 > 100) {
-        if (absDx1 > absDx2) {
-          ip = InternalClipper.getClosestPtOnSegment(ip, ae1.bot, ae1.top);
-        } else {
-          ip = InternalClipper.getClosestPtOnSegment(ip, ae2.bot, ae2.top);
-        }
-      } else if (absDx1 > 100) {
-        ip = InternalClipper.getClosestPtOnSegment(ip, ae1.bot, ae1.top);
-      } else if (absDx2 > 100) {
-        ip = InternalClipper.getClosestPtOnSegment(ip, ae2.bot, ae2.top);
+      if (absDx1 > 100 || absDx2 > 100) {
+        // move onto the flatter edge, using only its part inside the scanbeam since
+        // near parallel edges can meet far beyond it
+        const ae = (absDx1 > absDx2) ? ae1 : ae2;
+        const botY = this.currentBotY;
+        ip = InternalClipper.getClosestPtOnSegment(ip,
+          { x: ClipperBase.topX(ae, botY), y: botY },
+          { x: ClipperBase.topX(ae, topY), y: topY });
+        // the projection is rounded in double, which can overshoot with huge coordinates
+        if (ip.y < topY) ip.y = topY;
+        else if (ip.y > botY) ip.y = botY;
       } else {
         if (ip.y < topY) ip.y = topY;
         else ip.y = this.currentBotY;
@@ -1977,18 +2232,20 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       outrec.pts! : outrec.pts!.next!;
   }
 
-  private insertLeftEdge(ae: Active): void {
+  // TS: 'after' is an edge already in the AEL with a smaller curX, or null. The AEL is
+  // ordered by curX, so the search can start there and finds the same place.
+  private insertLeftEdge(ae: Active, after: Active | null): void {
     if (this.actives === null) {
       ae.prevInAEL = null;
       ae.nextInAEL = null;
       this.actives = ae;
-    } else if (!this.isValidAelOrder(this.actives, ae)) {
+    } else if (after === null && !this.isValidAelOrder(this.actives, ae)) {
       ae.prevInAEL = null;
       ae.nextInAEL = this.actives;
       this.actives.prevInAEL = ae;
       this.actives = ae;
     } else {
-      let ae2 = this.actives;
+      let ae2 = after !== null ? after : this.actives;
       while (ae2.nextInAEL !== null && this.isValidAelOrder(ae2.nextInAEL, ae)) {
         ae2 = ae2.nextInAEL;
       }
@@ -2308,7 +2565,7 @@ protected newOutRec(): OutRec {
       ((ae.bot.y > pt.y) || (prev.bot.y > pt.y))) return;  // (#490)
 
     if (checkCurrX) {
-      if (this.perpendicDistFromLineSqrdGreaterThanQuarter(pt, prev.bot, prev.top)) return;
+      if (this.perpendicDistFromLineSqrdGreaterThan(pt, prev.bot, prev.top, 1, 4)) return; // > 0.25
     }
     if (!InternalClipper.isCollinear(ae.top, pt, prev.top)) return;
 
@@ -2334,7 +2591,8 @@ protected newOutRec(): OutRec {
       ((ae.bot.y > pt.y) || (next.bot.y > pt.y)))  return; // (#490)
 
     if (checkCurrX) {
-      if (this.perpendicDistFromLineSqrdGreaterThanQuarter(pt, next.bot, next.top)) return;
+      // nb: C++ tests 0.35 here and 0.25 in checkJoinLeft
+      if (this.perpendicDistFromLineSqrdGreaterThan(pt, next.bot, next.top, 7, 20)) return; // > 0.35
     }
     if (!InternalClipper.isCollinear(ae.top, pt, next.top)) return;
 
@@ -2349,9 +2607,11 @@ protected newOutRec(): OutRec {
     next.joinWith = JoinWith.Left;
   }
 
-  private perpendicDistFromLineSqrdGreaterThanQuarter(
-    pt: Point64, line1: Point64, line2: Point64
+  // true when the squared distance of pt from the line exceeds limitNum / limitDen
+  private perpendicDistFromLineSqrdGreaterThan(
+    pt: Point64, line1: Point64, line2: Point64, limitNum: number, limitDen: number
   ): boolean {
+    const limit = limitNum / limitDen;
     const a = pt.x - line1.x;
     const b = pt.y - line1.y;
     const c = line2.x - line1.x;
@@ -2362,19 +2622,26 @@ protected newOutRec(): OutRec {
     if (Math.abs(a) < maxCoord && Math.abs(b) < maxCoord &&
         Math.abs(c) < maxCoord && Math.abs(d) < maxCoord) {
       const cross = (a * d) - (c * b);
-      return (cross * cross) / ((c * c) + (d * d)) > 0.25;
+      return (cross * cross) / ((c * c) + (d * d)) > limit;
     }
-    // Large coordinates: use BigInt for precision
+    // TS: crossProduct is accurate to rounding, so doubles settle this unless the two
+    // sides are within rounding error of each other
+    const crossD = InternalClipper.crossProduct(line1, pt, line2);
+    const crossSqD = crossD * crossD;
+    const scaled = limit * ((c * c) + (d * d));
+    if (crossSqD > scaled * 1.000000000001) return true;
+    if (crossSqD < scaled * 0.999999999999) return false;
+    // too close to call: use BigInt for precision
     if (Number.isSafeInteger(a) && Number.isSafeInteger(b) &&
         Number.isSafeInteger(c) && Number.isSafeInteger(d)) {
       const cross = (BigInt(a) * BigInt(d)) - (BigInt(c) * BigInt(b));
       const crossSq = cross * cross;
       const denom = (BigInt(c) * BigInt(c)) + (BigInt(d) * BigInt(d));
-      return B4 * crossSq > denom;
+      return BigInt(limitDen) * crossSq > BigInt(limitNum) * denom;
     }
     // Fallback for non-integer coords
     const cross = (a * d) - (c * b);
-    return (cross * cross) / ((c * c) + (d * d)) > 0.25;
+    return (cross * cross) / ((c * c) + (d * d)) > limit;
   }
 
 
@@ -2410,7 +2677,7 @@ protected newOutRec(): OutRec {
       // toggle contribution ...
       if (ClipperBase.isHotEdge(ae1)) {
         resultOp = this.addOutPt(ae1, pt);
-        this.setZ(ae1, ae2, resultOp.pt);
+        this.setZ(ae1, ae2, resultOp);
         if (ClipperBase.isFront(ae1)) {
           ae1.outrec!.frontEdge = null;
         } else {
@@ -2439,7 +2706,7 @@ protected newOutRec(): OutRec {
       } else {
         resultOp = this.startOpenPath(ae1, pt);
       }
-      this.setZ(ae1, ae2, resultOp.pt);
+      this.setZ(ae1, ae2, resultOp);
       return;
     }
 
@@ -2507,21 +2774,21 @@ protected newOutRec(): OutRec {
       if ((oldE1WindCount !== 0 && oldE1WindCount !== 1) || (oldE2WindCount !== 0 && oldE2WindCount !== 1) ||
           (ae1.localMin!.polytype !== ae2.localMin!.polytype && this.cliptype !== ClipType.Xor)) {
         resultOp = this.addLocalMaxPoly(ae1, ae2, pt);
-        if (resultOp) this.setZ(ae1, ae2, resultOp.pt);
+        if (resultOp) this.setZ(ae1, ae2, resultOp);
       } else if (ClipperBase.isFront(ae1) || (ae1.outrec === ae2.outrec)) {
         // this 'else if' condition isn't strictly needed but
         // it's sensible to split polygons that only touch at
         // a common vertex (not at common edges).
         resultOp = this.addLocalMaxPoly(ae1, ae2, pt);
-        if (resultOp) this.setZ(ae1, ae2, resultOp.pt);
+        if (resultOp) this.setZ(ae1, ae2, resultOp);
         const op2 = this.addLocalMinPoly(ae1, ae2, pt);
-        this.setZ(ae1, ae2, op2.pt);
+        this.setZ(ae1, ae2, op2);
       } else {
         // can't treat as maxima & minima
         resultOp = this.addOutPt(ae1, pt);
-        this.setZ(ae1, ae2, resultOp.pt);
+        this.setZ(ae1, ae2, resultOp);
         const op2 = this.addOutPt(ae2, pt);
-        this.setZ(ae1, ae2, op2.pt);
+        this.setZ(ae1, ae2, op2);
         this.swapOutrecs(ae1, ae2);
       }
     }
@@ -2529,11 +2796,11 @@ protected newOutRec(): OutRec {
     // if one or other edge is 'hot' ...
     else if (ClipperBase.isHotEdge(ae1)) {
       resultOp = this.addOutPt(ae1, pt);
-      this.setZ(ae1, ae2, resultOp.pt);
+      this.setZ(ae1, ae2, resultOp);
       this.swapOutrecs(ae1, ae2);
     } else if (ClipperBase.isHotEdge(ae2)) {
       resultOp = this.addOutPt(ae2, pt);
-      this.setZ(ae1, ae2, resultOp.pt);
+      this.setZ(ae1, ae2, resultOp);
       this.swapOutrecs(ae1, ae2);
     }
 
@@ -2557,7 +2824,7 @@ protected newOutRec(): OutRec {
 
       if (!ClipperBase.isSamePolyType(ae1, ae2)) {
         resultOp = this.addLocalMinPoly(ae1, ae2, pt);
-        this.setZ(ae1, ae2, resultOp.pt);
+        this.setZ(ae1, ae2, resultOp);
       } else if (oldE1WindCount === 1 && oldE2WindCount === 1) {
         resultOp = null; 
         switch (this.cliptype) {
@@ -2582,7 +2849,7 @@ protected newOutRec(): OutRec {
             resultOp = this.addLocalMinPoly(ae1, ae2, pt);
             break;
         }
-        if (resultOp) this.setZ(ae1, ae2, resultOp.pt);
+        if (resultOp) this.setZ(ae1, ae2, resultOp);
       }
     }
   }
@@ -2983,7 +3250,7 @@ protected buildTree(polytree: PolyPathBase, solutionOpen: Paths64): void {
       if (outrec.owner.pts !== null && this.checkBounds(outrec.owner) &&
         // Fast reject: a container must contain the child's bounds.
         this.containsRect(outrec.owner.bounds, outrec.bounds) &&
-        this.path1InsidePath2(outrec.pts!, outrec.owner.pts!)) break;
+        this.path1InsideOwner(outrec.pts!, outrec.owner)) break;
       outrec.owner = outrec.owner.owner;
     }
 
@@ -3119,7 +3386,7 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
   // dropped. But when it lies inside the remainder it is a hole the remainder
   // already covers (the loop's -1 cancels the remainder's +1): dropping it
   // fills that hole. Keep such a loop as its own (hole) path.
-  if (!(absDoubleArea2 > B2)) return; // area > 1
+  if (absDoubleArea2 < B1) return; // as in C++
   const isHoleOfRemainder = !(absDoubleArea2 > absDoubleArea1) &&
     ((doubleArea2 > B0) !== (doubleArea1 > B0));
   if (isHoleOfRemainder &&
@@ -3268,7 +3535,7 @@ private checkSplitOwner(outrec: OutRec, splits: number[]): boolean {
 
       if (!this.checkBounds(split) ||
           !this.containsRect(split.bounds, outrec.bounds) ||
-          !this.path1InsidePath2(outrec.pts!, split.pts!)) continue;
+          !this.path1InsideOwner(outrec.pts!, split)) continue;
 
       if (!this.isValidOwner(outrec, split)) { // split is owned by outrec (#957)
         split.owner = outrec.owner;
@@ -3322,15 +3589,17 @@ public addPaths(paths: Paths64, polytype: PathType, isOpen: boolean = false): vo
       
       solutionClosed.length = 0;
       if (solutionOpen) solutionOpen.length = 0;
-      
+      // (an earlier execute into a PolyTree on this clipper must not carry over)
+      this.usingPolytree = false;
+
+      // an exception (from a Z callback, say) escapes execute, as in C++, and the
+      // clipper is still left clean for the next call
       try {
         this.executeInternal(clipType, fillRule);
         this.buildPaths(solutionClosed, solutionOpen || []);
-      } catch {
-        this.succeeded = false;
+      } finally {
+        this.clearSolutionOnly();
       }
-      
-      this.clearSolutionOnly();
       return this.succeeded;
     } else {
       // PolyTree64 version
@@ -3344,11 +3613,9 @@ public addPaths(paths: Paths64, polytype: PathType, isOpen: boolean = false): vo
       try {
         this.executeInternal(clipType, fillRule);
         this.buildTree(polytree, openPaths || []);
-      } catch {
-        this.succeeded = false;
+      } finally {
+        this.clearSolutionOnly();
       }
-      
-      this.clearSolutionOnly();
       return this.succeeded;
     }
   }
@@ -3482,19 +3749,19 @@ export class ClipperD extends ClipperBase {
       
       solutionClosed.length = 0;
       if (solutionOpen) solutionOpen.length = 0;
-      
-      let success = true;
+      // (an earlier execute into a PolyTree on this clipper must not carry over)
+      this.usingPolytree = false;
+
+      // an exception escapes execute, as in C++ (see Clipper64.execute)
       try {
         this.executeInternal(clipType, fillRule);
         // Call regular buildPaths which includes cleanCollinear and fixSelfIntersects
         this.buildPaths(solClosed64, solOpen64);
-      } catch {
-        success = false;
+      } finally {
+        this.clearSolutionOnly();
       }
-      
-      this.clearSolutionOnly();
-      if (!success) return false;
-      
+
+
       // Convert Paths64 to PathsD
       for (const path of solClosed64) {
         solutionClosed.push(this.scalePathDFromInt(path, this.invScale));
@@ -3516,15 +3783,13 @@ export class ClipperD extends ClipperBase {
       this.usingPolytree = true;
       polytree.scale = this.scale;
       
-      let success = true;
       try {
         this.executeInternal(clipType, fillRule);
         this.buildTreeD(polytree, openPaths || []);
-      } catch {
-        success = false;
+      } finally {
+        this.clearSolutionOnly();
       }
-      this.clearSolutionOnly();
-      return success;
+      return true;
     }
   }
 }
@@ -3554,8 +3819,8 @@ export const Clipper = {
       InternalClipper.checkSafeScaleValue(pt.x, maxAbs, "scalePath64");
       InternalClipper.checkSafeScaleValue(pt.y, maxAbs, "scalePath64");
       result.push({
-        x: Math.round(pt.x * scale),
-        y: Math.round(pt.y * scale)
+        x: InternalClipper.roundAwayFromZero(pt.x * scale),
+        y: InternalClipper.roundAwayFromZero(pt.y * scale)
       });
     }
     return result;

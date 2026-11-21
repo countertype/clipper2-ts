@@ -8,11 +8,11 @@
 *******************************************************************************/
 
 import {
-  Point64, PointD, Path64, PathD, Paths64,
-  ClipType, FillRule,
+  Point64, PointD, Path64, PathD, Paths64, Rect64,
+  ClipType, FillRule, PointInPolygonResult,
   Point64Utils, PointDUtils, InternalClipper
 } from './Core.js';
-import { Clipper64, PolyTree64 } from './Engine.js';
+import { Clipper64, PolyTree64, StripeIndex } from './Engine.js';
 
 export enum JoinType {
   Miter = 0,
@@ -29,12 +29,289 @@ export enum EndType {
   Round = 4
 }
 
+// a path's area, as its exact sign and twice its magnitude
+interface ExactArea {
+  sign: number;
+  twiceMagnitude: number;
+}
+
+function exactArea(path: Path64): ExactArea {
+  const cnt = path.length;
+  let minX = path[0].x, maxX = minX, minY = path[0].y, maxY = minY;
+  let allSafe = true;
+  for (let i = 0; i < cnt; i++) {
+    const pt = path[i];
+    if (pt.x < minX) minX = pt.x; else if (pt.x > maxX) maxX = pt.x;
+    if (pt.y < minY) minY = pt.y; else if (pt.y > maxY) maxY = pt.y;
+    if (allSafe && !(Number.isSafeInteger(pt.x) && Number.isSafeInteger(pt.y))) allSafe = false;
+  }
+
+  // TS: C++ always sums in 128 bits. Here the area is taken relative to the path's own
+  // corner. With a span below 2^26 every term is exact in doubles, and so is the sum
+  // for as long as it stays a safe integer, which is checked as it goes.
+  // Coordinates that are not safe integers are summed in doubles too.
+  const span = Math.max(maxX - minX, maxY - minY);
+  if (!allSafe || span < 67108864) {
+    const limit = allSafe ? Number.MAX_SAFE_INTEGER : Infinity;
+    let sum = 0;
+    let px = path[cnt - 1].x - minX, py = path[cnt - 1].y - minY;
+    let i = 0;
+    for (; i < cnt; i++) {
+      const x = path[i].x - minX, y = path[i].y - minY;
+      sum += px * y - x * py;
+      if (sum > limit || sum < -limit) break;
+      px = x;
+      py = y;
+    }
+    if (i === cnt) {
+      if (sum < 0) return { sign: -1, twiceMagnitude: -sum };
+      return { sign: sum > 0 ? 1 : 0, twiceMagnitude: sum };
+    }
+  }
+
+  // above that the terms round, so their rounding errors are summed beside them. The
+  // errors are whole numbers, and while their sum stays a safe integer the two sums
+  // together are the exact area.
+  if (allSafe) {
+    const limit = Number.MAX_SAFE_INTEGER;
+    let sum = 0, err = 0;
+    let px = path[cnt - 1].x - minX, py = path[cnt - 1].y - minY;
+    let i = 0;
+    for (; i < cnt; i++) {
+      const x = path[i].x - minX, y = path[i].y - minY;
+      const p = px * y, q = x * py;
+      const d = p - q;
+      let bv = p - d;
+      err += InternalClipper.productError(px, y, p) - InternalClipper.productError(x, py, q) +
+        ((p - (d + bv)) + (bv - q));
+      const s = sum + d;
+      bv = s - sum;
+      err += (sum - (s - bv)) + (d - bv);
+      sum = s;
+      if (err > limit || err < -limit) break;
+      px = x;
+      py = y;
+    }
+    if (i === cnt) {
+      const twice = sum + err;
+      if (twice < 0) return { sign: -1, twiceMagnitude: -twice };
+      return { sign: twice > 0 ? 1 : 0, twiceMagnitude: twice };
+    }
+  }
+
+  // otherwise BigInt carries the sum. The sign is exact, and the magnitude is exact
+  // up to 2^53 and the nearest double above that.
+  let twice = BigInt(0);
+  for (let i = 0, j = cnt - 1; i < cnt; j = i++) {
+    twice += BigInt(path[j].x) * BigInt(path[i].y) - BigInt(path[i].x) * BigInt(path[j].y);
+  }
+  if (twice < 0) return { sign: -1, twiceMagnitude: Number(-twice) };
+  return { sign: twice > 0 ? 1 : 0, twiceMagnitude: Number(twice) };
+}
+
+// true when path lies inside a container, judged by the first of its vertices that locate
+// doesn't put on the container's edge. A path touching it at every vertex counts as inside.
+function isInside(path: Path64, locate: (pt: Point64) => PointInPolygonResult): boolean {
+  for (const pt of path) {
+    const pip = locate(pt);
+    if (pip !== PointInPolygonResult.IsOn) return pip === PointInPolygonResult.IsInside;
+  }
+  return true;
+}
+
+// true when any vertex of path is inside a container, or all of them are on its edge
+function hasVertexInside(path: Path64, locate: (pt: Point64) => PointInPolygonResult): boolean {
+  let allOn = true;
+  for (const pt of path) {
+    const pip = locate(pt);
+    if (pip === PointInPolygonResult.IsInside) return true;
+    if (pip === PointInPolygonResult.IsOutside) allOn = false;
+  }
+  return allOn;
+}
+
+// true when every vertex lies on one line, so the path encloses no area
+function isFlat(path: Path64): boolean {
+  const cnt = path.length;
+  const pt0 = path[0];
+  let i = 1;
+  while (i < cnt && path[i].x === pt0.x && path[i].y === pt0.y) i++;
+  if (i === cnt) return true;
+
+  const pt1 = path[i];
+  for (i++; i < cnt; i++) {
+    if (InternalClipper.crossProductSign(pt0, pt1, path[i]) !== 0) return false;
+  }
+  return true;
+}
+
+interface BoundsNode {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  first: number;
+  count: number;
+  activeCount: number;
+}
+
+// each node covers a run of items, which index the nodes of the level below, or the boxes,
+// and parents maps each of those to the node covering it
+interface BoundsLevel {
+  items: number[];
+  parents: number[];
+  nodes: BoundsNode[];
+}
+
+// A static R-tree, packed by sorting the boxes into tiles. Tiling by rank rather than by
+// coordinate keeps it balanced however the boxes cluster. Boxes can be marked active, and each
+// node counts its active boxes, so a query for active boxes skips whole subtrees of the others.
+class BoundsTree {
+  private static readonly nodeSize = 16;
+  private readonly boxes: Rect64[];
+  private readonly isActive: boolean[];
+  private readonly levels: BoundsLevel[] = [];
+
+  constructor(boxes: Rect64[]) {
+    this.boxes = boxes;
+    this.isActive = new Array<boolean>(boxes.length).fill(false);
+    const nodeSize = BoundsTree.nodeSize;
+    let rects: Rect64[] = boxes;
+
+    while (rects.length > 0) {
+      const items = BoundsTree.tileOrder(rects);
+      const parents = new Array<number>(rects.length);
+      const nodes: BoundsNode[] = [];
+
+      for (let first = 0; first < items.length; first += nodeSize) {
+        const count = Math.min(nodeSize, items.length - first);
+        const node: BoundsNode = {
+          left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity,
+          first, count, activeCount: 0
+        };
+
+        for (let i = first; i < first + count; i++) {
+          const r = rects[items[i]];
+          if (r.left < node.left) node.left = r.left;
+          if (r.top < node.top) node.top = r.top;
+          if (r.right > node.right) node.right = r.right;
+          if (r.bottom > node.bottom) node.bottom = r.bottom;
+          parents[items[i]] = nodes.length;
+        }
+        nodes.push(node);
+      }
+
+      this.levels.push({ items, parents, nodes });
+      if (nodes.length === 1) break;
+      rects = nodes;
+    }
+  }
+
+  public setActive(box: number, isActive: boolean): void {
+    if (this.isActive[box] === isActive) return;
+
+    this.isActive[box] = isActive;
+    let item = box;
+    for (const level of this.levels) {
+      item = level.parents[item];
+      level.nodes[item].activeCount += isActive ? 1 : -1;
+    }
+  }
+
+  // calls fn with the index of every box that meets, or of every active one, where meets must
+  // also hold for every box enclosing one that it holds for
+  public query(meets: (r: Rect64) => boolean, fn: (box: number) => void, activeOnly: boolean = false): void {
+    const levels = this.levels;
+    if (levels.length === 0) return;
+
+    const stackLevel: number[] = [];
+    const stackNode: number[] = [];
+    const top = levels.length - 1;
+    for (let i = 0; i < levels[top].nodes.length; i++) {
+      stackLevel.push(top);
+      stackNode.push(i);
+    }
+
+    while (stackLevel.length > 0) {
+      const levelIdx = stackLevel.pop()!;
+      const level = levels[levelIdx];
+      const node = level.nodes[stackNode.pop()!];
+
+      if ((activeOnly && node.activeCount === 0) || !meets(node)) continue;
+
+      for (let i = node.first; i < node.first + node.count; i++) {
+        const item = level.items[i];
+        if (levelIdx > 0) {
+          stackLevel.push(levelIdx - 1);
+          stackNode.push(item);
+        } else if ((!activeOnly || this.isActive[item]) && meets(this.boxes[item])) {
+          fn(item);
+        }
+      }
+    }
+  }
+
+  // sorts by x into vertical slices about as many as there are tiles per slice, then by y
+  private static tileOrder(rects: Rect64[]): number[] {
+    const cnt = rects.length;
+    const nodeSize = BoundsTree.nodeSize;
+    const midX = new Array<number>(cnt);
+    const midY = new Array<number>(cnt);
+    const order = new Array<number>(cnt);
+    for (let i = 0; i < cnt; i++) {
+      midX[i] = rects[i].left / 2.0 + rects[i].right / 2.0;
+      midY[i] = rects[i].top / 2.0 + rects[i].bottom / 2.0;
+      order[i] = i;
+    }
+    order.sort((a, b) => midX[a] - midX[b]);
+
+    const tiles = Math.floor((cnt + nodeSize - 1) / nodeSize);
+    const slices = Math.ceil(Math.sqrt(tiles));
+    const sliceLen = Math.floor((tiles + slices - 1) / slices) * nodeSize;
+    if (sliceLen >= cnt) return order.sort((a, b) => midY[a] - midY[b]);
+
+    const result: number[] = [];
+    for (let first = 0; first < cnt; first += sliceLen) {
+      const slice = order.slice(first, Math.min(first + sliceLen, cnt));
+      slice.sort((a, b) => midY[a] - midY[b]);
+      for (const i of slice) result.push(i);
+    }
+    return result;
+  }
+}
+
+// Locates points in a set of polygons. A large polygon gets an edge index on its first use, since
+// many small paths may be tested against it.
+class PolygonLocator {
+  private readonly indexes: (StripeIndex | undefined)[];
+
+  constructor(count: number) {
+    this.indexes = new Array<StripeIndex | undefined>(count);
+  }
+
+  public locate(pt: Point64, polygon: Path64, polygonIdx: number): PointInPolygonResult {
+    if (polygon.length < 64) return InternalClipper.pointInPolygon(pt, polygon);
+
+    let index = this.indexes[polygonIdx];
+    if (index === undefined) {
+      index = new StripeIndex();
+      index.buildFromPath(polygon);
+      this.indexes[polygonIdx] = index;
+    }
+    // an empty index is one that declined the polygon
+    return index.empty ? InternalClipper.pointInPolygon(pt, polygon) : index.pointInPolygon(pt);
+  }
+}
+
 class Group {
   public inPaths: Paths64;
   public joinType: JoinType;
   public endType: EndType;
-  public pathsReversed: boolean;
-  public lowestPathIdx: number;
+  public areas: ExactArea[] = []; // of each path in a polygon group
+  public outerIdx: number = 0; // the largest closed path
+  public outerSign: number = 0; // sign of the largest closed path's area, 0 if none
+  public isStray: boolean[] | null = null; // holes no outer encloses, null if there are none
+  public pathsReversed: boolean = false;
 
   constructor(paths: Paths64, joinType: JoinType, endType: EndType = EndType.Polygon) {
     this.joinType = joinType;
@@ -43,20 +320,29 @@ class Group {
     const isJoined = (endType === EndType.Polygon) || (endType === EndType.Joined);
     this.inPaths = [];
     for (const path of paths) {
-      this.inPaths.push(ClipperOffset.stripDuplicates(path, isJoined));
+      const stripped = ClipperOffset.stripDuplicates(path, isJoined);
+      // the offset code assumes every path has at least one vertex
+      if (stripped.length > 0) this.inPaths.push(stripped);
     }
 
-    if (endType === EndType.Polygon) {
-      const lowestInfo = ClipperOffset.getLowestPathInfo(this.inPaths);
-      this.lowestPathIdx = lowestInfo.idx;
-      // the lowermost path must be an outer path, so if its orientation is negative,
-      // then flag that the whole group is 'reversed' (will negate delta etc.)
-      // as this is much more efficient than reversing every path.
-      this.pathsReversed = (this.lowestPathIdx >= 0) && lowestInfo.isNegArea;
-    } else {
-      this.lowestPathIdx = -1;
-      this.pathsReversed = false;
+    if (endType !== EndType.Polygon) return;
+
+    // sizes compare exactly, so paths of nearly equal size rank the same however they're wound.
+    // The first path wins a tie.
+    let largest = 0;
+    for (let i = 0; i < this.inPaths.length; i++) {
+      const a = exactArea(this.inPaths[i]);
+      this.areas.push(a);
+      if (a.twiceMagnitude > largest) {
+        largest = a.twiceMagnitude;
+        this.outerSign = a.sign;
+        this.outerIdx = i;
+      }
     }
+  }
+
+  public isStrayPath(pathIdx: number): boolean {
+    return this.isStray !== null && this.isStray[pathIdx];
   }
 }
 
@@ -90,7 +376,6 @@ export class ClipperOffset {
   private stepSin: number = 0;
   private stepCos: number = 0;
   private joinType: JoinType = JoinType.Bevel;
-  private endType: EndType = EndType.Polygon;
 
   public arcTolerance: number = 0;
   public mergeGroups: boolean = true;
@@ -144,62 +429,222 @@ export class ClipperOffset {
     this.groupList.push(new Group(paths, joinType, endType));
   }
 
-  private calcSolutionCapacity(): number {
-    let result = 0;
-    for (const g of this.groupList) {
-      result += (g.endType === EndType.Joined) ? g.inPaths.length * 2 : g.inPaths.length;
-    }
-    return result;
-  }
+  private setGroupOrientations(): void {
+    // a group's outers share the orientation of its largest closed path, which a hole touching
+    // its outer or a stray sliver left by clipping can't outweigh. Flagging groups as 'reversed'
+    // (negating delta etc.) is much more efficient than reversing every path.
+    const groups = this.groupList;
+    let hasCcw = false, hasCw = false, hasHoles = false;
 
-  private checkPathsReversed(): boolean {
-    let result = false;
-    for (const g of this.groupList) {
-      if (g.endType === EndType.Polygon) {
-        result = g.pathsReversed;
-        break;
+    for (const g of groups) {
+      g.pathsReversed = g.outerSign < 0;
+      g.isStray = null;
+      hasCcw = hasCcw || (g.outerSign > 0);
+      hasCw = hasCw || (g.outerSign < 0);
+
+      for (let j = 0; j < g.areas.length && !hasHoles; j++) {
+        const sign = g.areas[j].sign;
+        hasHoles = sign !== 0 && sign !== g.outerSign;
       }
     }
-    return result;
+
+    // only a group wound against another can hold that group's holes
+    const isMixed = hasCcw && hasCw;
+
+    if (!isMixed && !hasHoles) return;
+
+    // TS: the lists below are only built once it's known they are needed
+    const sizes: number[] = [];      // of each path with area, over all groups
+    const groupIdxs: number[] = [];  // its group
+    const pathIdxs: number[] = [];   // and its index in that group
+    const bounds: Rect64[] = [];
+    const groupEnds: number[] = [];  // where each group's paths end in the lists above
+    const outerRefs = new Array<number>(groups.length).fill(0); // each group's largest path
+
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
+      for (let j = 0; j < g.areas.length; j++) {
+        if (g.areas[j].sign === 0) continue;
+        if (j === g.outerIdx) outerRefs[i] = sizes.length;
+
+        sizes.push(g.areas[j].twiceMagnitude);
+        groupIdxs.push(i);
+        pathIdxs.push(j);
+        bounds.push(InternalClipper.getBounds(g.inPaths[j]));
+      }
+      groupEnds.push(sizes.length);
+    }
+
+    // A group wound against another holds that group's holes when its largest path lies inside one
+    // of that group's outers, and the innermost enclosing path decides, so a group inside another
+    // group's hole stays an island. A hole that no outer at least as large encloses is stray and
+    // contributes nothing. Each decision depends only on paths at least as large, so the paths are
+    // settled from the largest down, with a group's own largest path first among equals.
+    const cnt = sizes.length;
+    const order = new Array<number>(cnt);
+    for (let i = 0; i < cnt; i++) order[i] = i;
+
+    const isGroupOuter = (i: number): boolean => pathIdxs[i] === groups[groupIdxs[i]].outerIdx;
+
+    if (isMixed) {
+      order.sort((a, b) => {
+        if (sizes[a] > sizes[b]) return -1;
+        if (sizes[a] < sizes[b]) return 1;
+        const oa = isGroupOuter(a), ob = isGroupOuter(b);
+        return oa === ob ? 0 : (oa ? -1 : 1);
+      });
+    }
+
+    const pathOf = (i: number): Path64 => groups[groupIdxs[i]].inPaths[pathIdxs[i]];
+    const signOf = (i: number): number => groups[groupIdxs[i]].areas[pathIdxs[i]].sign;
+    const isOuter = (i: number): boolean => (signOf(i) < 0) === groups[groupIdxs[i]].pathsReversed;
+
+    // the outers are active, so a hole looking for one skips the holes around it. Holes inside
+    // their own group's outer don't need the tree at all.
+    let tree: BoundsTree | null = null;
+    const getTree = (): BoundsTree => {
+      if (tree !== null) return tree;
+      tree = new BoundsTree(bounds);
+      for (let i = 0; i < cnt; i++) tree.setActive(i, isOuter(i));
+      return tree;
+    };
+
+    const locator = new PolygonLocator(cnt);
+    const locateIn = (i: number) => (pt: Point64): PointInPolygonResult => locator.locate(pt, pathOf(i), i);
+
+    for (const k of order) {
+      const groupIdx = groupIdxs[k];
+      const g = groups[groupIdx];
+      const path = pathOf(k);
+      const pb = bounds[k];
+
+      if (pathIdxs[k] === g.outerIdx) {
+        if (!isMixed) continue;
+
+        const enclosers: number[] = [];
+        getTree().query(
+          (r) => pb.left >= r.left && pb.right <= r.right && pb.top >= r.top && pb.bottom <= r.bottom,
+          (i) => {
+            if (groupIdxs[i] !== groupIdx && sizes[i] > sizes[k] &&
+              !groups[groupIdxs[i]].isStrayPath(pathIdxs[i])) enclosers.push(i);
+          });
+
+        // smallest first, since only the smallest few enclosers are usually needed
+        enclosers.sort((a, b) => sizes[a] < sizes[b] ? -1 : (sizes[a] > sizes[b] ? 1 : 0));
+        let innermost = cnt;
+        let isHole = false;
+
+        for (const i of enclosers) {
+          if (innermost < cnt && sizes[i] > sizes[innermost]) break;
+          if (!isInside(path, locateIn(i))) continue;
+
+          innermost = i;
+          // the enclosing path must be one of its group's outers, wound against this group
+          if (isOuter(i) && signOf(i) !== g.outerSign) isHole = true;
+        }
+
+        if (!isHole) continue;
+
+        g.pathsReversed = !g.pathsReversed;
+        const t = getTree();
+        for (let i = groupIdx > 0 ? groupEnds[groupIdx - 1] : 0; i < groupEnds[groupIdx]; i++) {
+          t.setActive(i, isOuter(i));
+        }
+        continue;
+      }
+
+      if (isOuter(k)) continue;
+
+      // a hole with a vertex inside an outer counts as enclosed, so one poking out still cuts it
+      const ownOuter = outerRefs[groupIdx];
+      const ob = bounds[ownOuter];
+      let isEnclosed = isOuter(ownOuter) &&
+        Math.max(ob.left, pb.left) <= Math.min(ob.right, pb.right) &&
+        Math.max(ob.top, pb.top) <= Math.min(ob.bottom, pb.bottom) &&
+        hasVertexInside(path, locateIn(ownOuter));
+
+      if (!isEnclosed) {
+        getTree().query(
+          (r) => !isEnclosed &&
+            Math.max(r.left, pb.left) <= Math.min(r.right, pb.right) &&
+            Math.max(r.top, pb.top) <= Math.min(r.bottom, pb.bottom),
+          (i) => {
+            if (sizes[i] >= sizes[k]) isEnclosed = hasVertexInside(path, locateIn(i));
+          }, true);
+      }
+
+      if (isEnclosed) continue;
+
+      if (g.isStray === null) g.isStray = new Array<boolean>(g.inPaths.length).fill(false);
+      g.isStray[pathIdxs[k]] = true;
+    }
+  }
+
+  private initClipper(c: Clipper64): void {
+    c.preserveCollinear = this.preserveCollinear;
+    c.zCallback = this.ZCB;
+  }
+
+  private keepGrownRegions(): void {
+    // growth is always wound positively, so a positive union removes the eroded regions
+    const c = new Clipper64();
+    this.initClipper(c);
+    c.addSubject([this.solution.pop()!]);
+    const grown: Paths64 = [];
+    c.execute(ClipType.Union, FillRule.Positive, grown);
+    for (const path of grown) this.solution.push(path);
   }
 
   private executeInternal(delta: number): void {
     if (this.groupList.length === 0) return;
-    
+    this.setGroupOrientations();
+
     // make sure the offset delta is significant
+    // TS: an open path has no width at an insignificant delta, so it is returned as it
+    // was given, without the union that would close it into a polygon
+    const openPaths: Paths64 = [];
+
     if (Math.abs(delta) < 0.5) {
       for (const group of this.groupList) {
-        for (const path of group.inPaths) {
-          this.solution.push(path);
+        if (group.endType !== EndType.Polygon) {
+          for (const path of group.inPaths) openPaths.push(path);
+          continue;
+        }
+
+        for (let i = 0; i < group.inPaths.length; i++) {
+          if (group.isStrayPath(i)) continue;
+          const path = group.inPaths[i];
+          this.solution.push(group.pathsReversed ? [...path].reverse() : path);
         }
       }
-      return;
-    }
-
-    this.delta = delta;
-    this.mitLimSqr = (this.miterLimit <= 1 ?
-      2.0 : 2.0 / ClipperOffset.sqr(this.miterLimit));
-
-    for (const group of this.groupList) {
-      this.doGroupOffset(group);
-    }
-
-    if (this.groupList.length === 0) return;
-
-    const pathsReversed = this.checkPathsReversed();
-    const fillRule = pathsReversed ? FillRule.Negative : FillRule.Positive;
-
-    // clean up self-intersections ...
-    const c = new Clipper64();
-    c.preserveCollinear = this.preserveCollinear;
-    c.reverseSolution = this.reverseSolution !== pathsReversed;
-    c.zCallback = this.ZCB;
-    c.addSubject(this.solution);
-    
-    if (this.solutionTree !== null) {
-      c.execute(ClipType.Union, fillRule, this.solutionTree);
     } else {
-      c.execute(ClipType.Union, fillRule, this.solution);
+      this.delta = delta;
+      this.mitLimSqr = (this.miterLimit <= 1 ?
+        2.0 : 2.0 / ClipperOffset.sqr(this.miterLimit));
+
+      for (const group of this.groupList) {
+        this.doGroupOffset(group);
+      }
+    }
+
+    if (this.solution.length > 0) {
+      // clean up self-intersections ...
+      const c = new Clipper64();
+      this.initClipper(c);
+      c.reverseSolution = this.reverseSolution;
+      c.addSubject(this.solution);
+
+      // outers are wound positively, whatever the orientation of the input
+      if (this.solutionTree !== null) {
+        c.execute(ClipType.Union, FillRule.Positive, this.solutionTree);
+      } else {
+        c.execute(ClipType.Union, FillRule.Positive, this.solution);
+      }
+    }
+
+    // nb: a PolyTree64 holds closed paths only, so these go to a paths solution alone
+    if (this.solutionTree === null) {
+      for (const path of openPaths) this.solution.push(path);
     }
   }
 
@@ -211,6 +656,7 @@ export class ClipperOffset {
       const solution = solutionOrTree;
       solution.length = 0;
       this.solution = solution;
+      this.solutionTree = null; // a tree from an earlier execute must not take this result
       this.executeInternal(delta);
     } else {
       // PolyTree64 version
@@ -237,28 +683,6 @@ export class ClipperOffset {
       x: dy * f,
       y: -dx * f
     };
-  }
-
-  public static getLowestPathInfo(paths: Paths64): { idx: number; isNegArea: boolean } {
-    let idx = -1;
-    let isNegArea = false;
-    const botPt: Point64 = { x: Number.MAX_SAFE_INTEGER, y: Number.MIN_SAFE_INTEGER };
-    
-    for (let i = 0; i < paths.length; ++i) {
-      let a = Number.MAX_VALUE;
-      for (const pt of paths[i]) {
-        if ((pt.y < botPt.y) || ((pt.y === botPt.y) && (pt.x >= botPt.x))) continue;
-        if (a === Number.MAX_VALUE) {
-          a = ClipperOffset.area(paths[i]);
-          if (a === 0) break; // invalid closed path so break from inner loop
-          isNegArea = a < 0;
-        }
-        idx = i;
-        botPt.x = pt.x;
-        botPt.y = pt.y;
-      }
-    }
-    return { idx, isNegArea };
   }
 
   private static translatePoint(pt: PointD, dx: number, dy: number): PointD {
@@ -288,33 +712,21 @@ export class ClipperOffset {
     return ClipperOffset.normalizeVector({ x: vec1.x + vec2.x, y: vec1.y + vec2.y });
   }
 
-  private static intersectPoint(pt1a: PointD, pt1b: PointD, pt2a: PointD, pt2b: PointD): PointD {
-    if (InternalClipper.isAlmostZero(pt1a.x - pt1b.x)) { // vertical
-      if (InternalClipper.isAlmostZero(pt2a.x - pt2b.x)) return { x: 0, y: 0 };
-      const m2 = (pt2b.y - pt2a.y) / (pt2b.x - pt2a.x);
-      const b2 = pt2a.y - m2 * pt2a.x;
-      return { x: pt1a.x, y: m2 * pt1a.x + b2 };
-    }
-
-    if (InternalClipper.isAlmostZero(pt2a.x - pt2b.x)) { // vertical
-      const m1 = (pt1b.y - pt1a.y) / (pt1b.x - pt1a.x);
-      const b1 = pt1a.y - m1 * pt1a.x;
-      return { x: pt2a.x, y: m1 * pt2a.x + b1 };
-    } else {
-      const m1 = (pt1b.y - pt1a.y) / (pt1b.x - pt1a.x);
-      const b1 = pt1a.y - m1 * pt1a.x;
-      const m2 = (pt2b.y - pt2a.y) / (pt2b.x - pt2a.x);
-      const b2 = pt2a.y - m2 * pt2a.x;
-      if (InternalClipper.isAlmostZero(m1 - m2)) return { x: 0, y: 0 };
-      const x = (b2 - b1) / (m1 - m2);
-      return { x: x, y: m1 * x + b1 };
-    }
+  // Intersection of the cap segment pt1..pt2 with the line through pt3 and pt4,
+  // clamped to the cap segment as in C++ (GetLineIntersectPt).
+  // The lines are only parallel for collinear edges, which offsetPoint
+  // sends to doMiter, so the ptQ fallback is a safeguard.
+  private static squareIntersect(pt1: PointD, pt2: PointD, pt3: PointD, pt4: PointD, ptQ: PointD): PointD {
+    const res = InternalClipper.getLineIntersectPtD(pt1, pt2, pt3, pt4);
+    const pt = res.success ? res.ip : { x: ptQ.x, y: ptQ.y };
+    pt.z = ptQ.z;
+    return pt;
   }
 
   private getPerpendic(pt: Point64, norm: PointD): Point64 {
     return {
-      x: Math.round(pt.x + norm.x * this.groupDelta),
-      y: Math.round(pt.y + norm.y * this.groupDelta),
+      x: InternalClipper.roundAwayFromZero(pt.x + norm.x * this.groupDelta),
+      y: InternalClipper.roundAwayFromZero(pt.y + norm.y * this.groupDelta),
       z: (pt.z || 0)
     };
   }
@@ -333,24 +745,24 @@ export class ClipperOffset {
     if (j === k) {
       const absDelta = Math.abs(this.groupDelta);
       pt1 = {
-        x: Math.round(path[j].x - absDelta * this.normals[j].x),
-        y: Math.round(path[j].y - absDelta * this.normals[j].y),
+        x: InternalClipper.roundAwayFromZero(path[j].x - absDelta * this.normals[j].x),
+        y: InternalClipper.roundAwayFromZero(path[j].y - absDelta * this.normals[j].y),
         z: pjz
       };
       pt2 = {
-        x: Math.round(path[j].x + absDelta * this.normals[j].x),
-        y: Math.round(path[j].y + absDelta * this.normals[j].y),
+        x: InternalClipper.roundAwayFromZero(path[j].x + absDelta * this.normals[j].x),
+        y: InternalClipper.roundAwayFromZero(path[j].y + absDelta * this.normals[j].y),
         z: pjz
       };
     } else {
       pt1 = {
-        x: Math.round(path[j].x + this.groupDelta * this.normals[k].x),
-        y: Math.round(path[j].y + this.groupDelta * this.normals[k].y),
+        x: InternalClipper.roundAwayFromZero(path[j].x + this.groupDelta * this.normals[k].x),
+        y: InternalClipper.roundAwayFromZero(path[j].y + this.groupDelta * this.normals[k].y),
         z: pjz
       };
       pt2 = {
-        x: Math.round(path[j].x + this.groupDelta * this.normals[j].x),
-        y: Math.round(path[j].y + this.groupDelta * this.normals[j].y),
+        x: InternalClipper.roundAwayFromZero(path[j].x + this.groupDelta * this.normals[j].x),
+        y: InternalClipper.roundAwayFromZero(path[j].y + this.groupDelta * this.normals[j].y),
         z: pjz
       };
     }
@@ -386,15 +798,13 @@ export class ClipperOffset {
         x: pt3.x + vec.x * this.groupDelta,
         y: pt3.y + vec.y * this.groupDelta
       };
-      const pt = ClipperOffset.intersectPoint(pt1, pt2, pt3, pt4);
-      pt.z = ptQ.z;
+      const pt = ClipperOffset.squareIntersect(pt1, pt2, pt3, pt4, ptQ);
       //get the second intersect point through reflecion
       this.pathOut.push(Point64Utils.fromPointD(ClipperOffset.reflectPoint(pt, ptQ)));
       this.pathOut.push(Point64Utils.fromPointD(pt));
     } else {
       const pt4 = this.getPerpendicD(path[j], this.normals[k]);
-      const pt = ClipperOffset.intersectPoint(pt1, pt2, pt3, pt4);
-      pt.z = ptQ.z;
+      const pt = ClipperOffset.squareIntersect(pt1, pt2, pt3, pt4, ptQ);
       this.pathOut.push(Point64Utils.fromPointD(pt));
       //get the second intersect point through reflecion
       this.pathOut.push(Point64Utils.fromPointD(ClipperOffset.reflectPoint(pt, ptQ)));
@@ -404,24 +814,33 @@ export class ClipperOffset {
   private doMiter(path: Path64, j: number, k: number, cosA: number): void {
     const q = this.groupDelta / (cosA + 1);
     this.pathOut.push({
-      x: Math.round(path[j].x + (this.normals[k].x + this.normals[j].x) * q),
-      y: Math.round(path[j].y + (this.normals[k].y + this.normals[j].y) * q),
+      x: InternalClipper.roundAwayFromZero(path[j].x + (this.normals[k].x + this.normals[j].x) * q),
+      y: InternalClipper.roundAwayFromZero(path[j].y + (this.normals[k].y + this.normals[j].y) * q),
       z: (path[j].z || 0)
     });
   }
 
+  private setArcSteps(delta: number): void {
+    // calculate the number of steps required to approximate a circle
+    // arcTol - when arcTolerance is undefined (0) then curve imprecision
+    // will be relative to the size of the offset (delta). Obviously very
+    // large offsets will almost always require much less precision.
+    // As in C++, the tolerance is capped at delta and the steps at delta * PI,
+    // so that a small circle isn't given more vertices than it has units of circumference
+    const absDelta = Math.abs(delta);
+    const arcTol = this.arcTolerance > ClipperOffset.Tolerance ?
+      Math.min(absDelta, this.arcTolerance) : absDelta * ClipperOffset.arc_const;
+    const stepsPer360 = Math.min(Math.PI / Math.acos(1 - arcTol / absDelta), absDelta * Math.PI);
+    this.stepSin = Math.sin((2 * Math.PI) / stepsPer360);
+    this.stepCos = Math.cos((2 * Math.PI) / stepsPer360);
+    if (delta < 0.0) this.stepSin = -this.stepSin;
+    this.stepsPerRad = stepsPer360 / (2 * Math.PI);
+  }
+
   private doRound(path: Path64, j: number, k: number, angle: number): void {
-    if (this.deltaCallback !== null) {
-      // when deltaCallback is assigned, groupDelta won't be constant,
-      // so we'll need to do the following calculations for *every* vertex.
-      const absDelta = Math.abs(this.groupDelta);
-      const arcTol = this.arcTolerance > 0.01 ? this.arcTolerance : absDelta * ClipperOffset.arc_const;
-      const stepsPer360 = Math.PI / Math.acos(1 - arcTol / absDelta);
-      this.stepSin = Math.sin((2 * Math.PI) / stepsPer360);
-      this.stepCos = Math.cos((2 * Math.PI) / stepsPer360);
-      if (this.groupDelta < 0.0) this.stepSin = -this.stepSin;
-      this.stepsPerRad = stepsPer360 / (2 * Math.PI);
-    }
+    // when deltaCallback is assigned, groupDelta won't be constant,
+    // so the arc steps need recalculating for *every* vertex.
+    if (this.deltaCallback !== null) this.setArcSteps(this.groupDelta);
 
     const pt = path[j];
     const ptz = (pt.z || 0);
@@ -429,8 +848,8 @@ export class ClipperOffset {
     if (j === k) PointDUtils.negate(offsetVec);
     
     this.pathOut.push({
-      x: Math.round(pt.x + offsetVec.x),
-      y: Math.round(pt.y + offsetVec.y),
+      x: InternalClipper.roundAwayFromZero(pt.x + offsetVec.x),
+      y: InternalClipper.roundAwayFromZero(pt.y + offsetVec.y),
       z: ptz
     });
     
@@ -441,8 +860,8 @@ export class ClipperOffset {
         y: offsetVec.x * this.stepSin + offsetVec.y * this.stepCos
       };
       this.pathOut.push({
-        x: Math.round(pt.x + offsetVec.x),
-        y: Math.round(pt.y + offsetVec.y),
+        x: InternalClipper.roundAwayFromZero(pt.x + offsetVec.x),
+        y: InternalClipper.roundAwayFromZero(pt.y + offsetVec.y),
         z: ptz
       });
     }
@@ -477,7 +896,7 @@ export class ClipperOffset {
       this.groupDelta = this.deltaCallback(path, this.normals, j, k);
       if (group.pathsReversed) this.groupDelta = -this.groupDelta;
     }
-    if (Math.abs(this.groupDelta) < ClipperOffset.Tolerance) {
+    if (Math.abs(this.groupDelta) <= ClipperOffset.Tolerance) {
       this.pathOut.push(path[j]);
       return;
     }
@@ -525,6 +944,10 @@ export class ClipperOffset {
       this.offsetPoint(group, path, i, prev);
       prev = i;
     }
+
+    // a reversed group's outers come out negative, but the solution's outers are always positive
+    if (group.pathsReversed) this.pathOut.reverse();
+
     // pathOut is freshly allocated per call, so push directly (no spread clone needed)
     this.solution.push(this.pathOut);
   }
@@ -536,7 +959,7 @@ export class ClipperOffset {
     this.offsetPolygon(group, reversePath);
   }
 
-  private offsetOpenPath(group: Group, path: Path64): void {
+  private offsetOpenPath(group: Group, path: Path64, endType: EndType): void {
     this.pathOut = [];
     const highI = path.length - 1;
 
@@ -548,7 +971,7 @@ export class ClipperOffset {
     if (Math.abs(this.groupDelta) < ClipperOffset.Tolerance) {
       this.pathOut.push(path[0]);
     } else {
-      switch (this.endType) {
+      switch (endType) {
         case EndType.Butt:
           this.doBevel(path, 0, 0);
           break;
@@ -581,7 +1004,7 @@ export class ClipperOffset {
     if (Math.abs(this.groupDelta) < ClipperOffset.Tolerance) {
       this.pathOut.push(path[highI]);
     } else {
-      switch (this.endType) {
+      switch (endType) {
         case EndType.Butt:
           this.doBevel(path, highI, highI);
           break;
@@ -608,45 +1031,45 @@ export class ClipperOffset {
     if (group.endType === EndType.Polygon) {
       // a straight path (2 points) can now also be 'polygon' offset 
       // where the ends will be treated as (180 deg.) joins
-      if (group.lowestPathIdx < 0) this.delta = Math.abs(this.delta);
-      this.groupDelta = group.pathsReversed ? -this.delta : this.delta;
+      // (the sign of this.delta is kept for the groups that follow)
+      const delta = group.outerSign !== 0 ? this.delta : Math.abs(this.delta);
+      this.groupDelta = group.pathsReversed ? -delta : delta;
     } else {
       this.groupDelta = Math.abs(this.delta);
     }
 
-    const absDelta = Math.abs(this.groupDelta);
-
     this.joinType = group.joinType;
-    this.endType = group.endType;
 
     if (group.joinType === JoinType.Round || group.endType === EndType.Round) {
-      const arcTol = this.arcTolerance > 0.01 ? this.arcTolerance : absDelta * ClipperOffset.arc_const;
-      const stepsPer360 = Math.PI / Math.acos(1 - arcTol / absDelta);
-      this.stepSin = Math.sin((2 * Math.PI) / stepsPer360);
-      this.stepCos = Math.cos((2 * Math.PI) / stepsPer360);
-      if (this.groupDelta < 0.0) this.stepSin = -this.stepSin;
-      this.stepsPerRad = stepsPer360 / (2 * Math.PI);
+      this.setArcSteps(this.groupDelta);
     }
 
-    for (const pathIn of group.inPaths) {
+    for (let pathIdx = 0; pathIdx < group.inPaths.length; pathIdx++) {
+      if (group.isStrayPath(pathIdx)) continue;
+
+      const pathIn = group.inPaths[pathIdx];
       this.pathOut = [];
       const cnt = pathIn.length;
       if (cnt === 0) continue;
-      // nb: endType is changed below for 2 point joined paths
-      this.endType = group.endType;
+      this.buildNormals(pathIn);
 
       if (cnt === 1) {
         // single point
         const pt = pathIn[0];
+        let pointDelta = (group.endType === EndType.Polygon) ? this.delta : Math.abs(this.delta);
 
         if (this.deltaCallback !== null) {
-          this.groupDelta = this.deltaCallback(pathIn, this.normals, 0, 0);
-          if (group.pathsReversed) this.groupDelta = -this.groupDelta;
+          pointDelta = this.deltaCallback(pathIn, this.normals, 0, 0);
+          this.groupDelta = group.pathsReversed ? -pointDelta : pointDelta;
         }
 
+        // a point can only grow, so the caller's delta decides and not the group's orientation
+        if (pointDelta < 1) continue;
         // single vertex so build a circle or square ...
         const ptz = (pt.z || 0);
-        if (group.endType === EndType.Round) {
+        if (group.joinType === JoinType.Round) {
+          // doRound may have left the arc steps of another path's delta
+          if (this.deltaCallback !== null) this.setArcSteps(this.groupDelta);
           const steps = Math.ceil(this.stepsPerRad * 2 * Math.PI);
           this.pathOut = ClipperOffset.ellipse(pt, Math.abs(this.groupDelta), Math.abs(this.groupDelta), steps);
           if (ptz !== 0) for (let i = 0; i < this.pathOut.length; i++) this.pathOut[i].z = ptz;
@@ -665,22 +1088,31 @@ export class ClipperOffset {
         continue; // end of offsetting a single point
       }
 
-      if (cnt === 2 && group.endType === EndType.Joined) {
-        this.endType = (group.joinType === JoinType.Round) ?
+      // a 2 point joined path gets open path ends, for this path only
+      let endType = group.endType;
+      if (cnt === 2 && endType === EndType.Joined) {
+        endType = (group.joinType === JoinType.Round) ?
           EndType.Round :
           EndType.Square;
       }
 
-      this.buildNormals(pathIn);
-      switch (this.endType) {
-        case EndType.Polygon:
+      switch (endType) {
+        case EndType.Polygon: {
+          // a path without area can only grow, so a negative delta erodes it to nothing
+          const flat = isFlat(pathIn);
+          if (flat && this.deltaCallback === null && this.delta < 0) break;
+
           this.offsetPolygon(group, pathIn);
+
+          // a callback can grow some vertices and erode others, so keep only what grew
+          if (flat && this.deltaCallback !== null) this.keepGrownRegions();
           break;
+        }
         case EndType.Joined:
           this.offsetOpenJoined(group, pathIn);
           break;
         default:
-          this.offsetOpenPath(group, pathIn);
+          this.offsetOpenPath(group, pathIn, endType);
           break;
       }
     }
@@ -699,14 +1131,11 @@ export class ClipperOffset {
         result.push(lastPt);
       }
     }
-    if (isClosedPath && Point64Utils.equals(lastPt, result[0])) {
+    // (a single point is kept, as in C++)
+    if (isClosedPath && result.length > 1 && Point64Utils.equals(lastPt, result[0])) {
       result.pop();
     }
     return result;
-  }
-
-  public static area(path: Path64): number {
-    return InternalClipper.area(path);
   }
 
   public static sqr(val: number): number {
@@ -717,19 +1146,20 @@ export class ClipperOffset {
     if (radiusX <= 0) return [];
     if (radiusY <= 0) radiusY = radiusX;
     if (steps <= 2) {
-      steps = Math.ceil(Math.PI * Math.sqrt((radiusX + radiusY) / 2));
+      steps = Math.trunc(Math.PI * Math.sqrt((radiusX + radiusY) / 2)); // truncated, as in C++
+      if (steps < 3) steps = 3; // TS: C++ has no minimum
     }
 
     const si = Math.sin(2 * Math.PI / steps);
     const co = Math.cos(2 * Math.PI / steps);
     let dx = co;
     let dy = si;
-    const result: Path64 = [{ x: Math.round(center.x + radiusX), y: center.y }];
+    const result: Path64 = [{ x: InternalClipper.roundAwayFromZero(center.x + radiusX), y: center.y }];
     
     for (let i = 1; i < steps; ++i) {
       result.push({
-        x: Math.round(center.x + radiusX * dx),
-        y: Math.round(center.y + radiusY * dy)
+        x: InternalClipper.roundAwayFromZero(center.x + radiusX * dx),
+        y: InternalClipper.roundAwayFromZero(center.y + radiusY * dy)
       });
       const x = dx * co - dy * si;
       dy = dy * co + dx * si;

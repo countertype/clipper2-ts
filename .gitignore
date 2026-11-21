@@ -6,6 +6,7 @@ package-lock.json
 dist/
 .gh-pages/
 *.js
+!eslint.config.js
 *.js.map
 *.d.ts
 !tests/**/*.ts

@@ -347,8 +347,8 @@ export function offsetPath(path: Path64, dx: number, dy: number): Path64 {
 
 export function scalePoint64(pt: Point64, scale: number): Point64 {
   return {
-    x: Math.round(pt.x * scale),
-    y: Math.round(pt.y * scale)
+    x: InternalClipper.roundAwayFromZero(pt.x * scale),
+    y: InternalClipper.roundAwayFromZero(pt.y * scale)
   };
 }
 
@@ -366,10 +366,10 @@ export function scaleRect(rec: RectD, scale: number): Rect64 {
   InternalClipper.checkSafeScaleValue(rec.right, maxAbs, "scaleRect");
   InternalClipper.checkSafeScaleValue(rec.bottom, maxAbs, "scaleRect");
   return {
-    left: Math.round(rec.left * scale),
-    top: Math.round(rec.top * scale),
-    right: Math.round(rec.right * scale),
-    bottom: Math.round(rec.bottom * scale)
+    left: InternalClipper.roundAwayFromZero(rec.left * scale),
+    top: InternalClipper.roundAwayFromZero(rec.top * scale),
+    right: InternalClipper.roundAwayFromZero(rec.right * scale),
+    bottom: InternalClipper.roundAwayFromZero(rec.bottom * scale)
   };
 }
 
@@ -378,8 +378,8 @@ export function scalePath(path: Path64, scale: number): Path64 {
   const result: Path64 = [];
   for (const pt of path) {
     result.push({
-      x: Math.round(pt.x * scale),
-      y: Math.round(pt.y * scale)
+      x: InternalClipper.roundAwayFromZero(pt.x * scale),
+      y: InternalClipper.roundAwayFromZero(pt.y * scale)
     });
   }
   return result;
@@ -420,8 +420,8 @@ export function scalePath64(path: PathD, scale: number): Path64 {
     InternalClipper.checkSafeScaleValue(pt.x, maxAbs, "scalePath64");
     InternalClipper.checkSafeScaleValue(pt.y, maxAbs, "scalePath64");
     result.push({
-      x: Math.round(pt.x * scale),
-      y: Math.round(pt.y * scale)
+      x: InternalClipper.roundAwayFromZero(pt.x * scale),
+      y: InternalClipper.roundAwayFromZero(pt.y * scale)
     });
   }
   return result;
@@ -637,7 +637,8 @@ export function midPoint(pt1: Point64, pt2: Point64): Point64 {
       y: Number((BigInt(pt1.y) + BigInt(pt2.y)) / B2)
     };
   }
-  return { x: Math.round((pt1.x + pt2.x) / 2), y: Math.round((pt1.y + pt2.y) / 2) };
+  // integer division, as in C++ (and as the BigInt branch above does)
+  return { x: Math.trunc((pt1.x + pt2.x) / 2), y: Math.trunc((pt1.y + pt2.y) / 2) };
 }
 
 export function midPointD(pt1: PointD, pt2: PointD): PointD {
@@ -1098,19 +1099,20 @@ export function ellipse(center: Point64, radiusX: number, radiusY: number = 0, s
   if (radiusX <= 0) return [];
   if (radiusY <= 0) radiusY = radiusX;
   if (steps <= 2) {
-    steps = Math.ceil(Math.PI * Math.sqrt((radiusX + radiusY) / 2));
+    steps = Math.trunc(Math.PI * Math.sqrt((radiusX + radiusY) / 2)); // truncated, as in C++
+    if (steps < 3) steps = 3; // TS: C++ has no minimum
   }
 
   const si = Math.sin(2 * Math.PI / steps);
   const co = Math.cos(2 * Math.PI / steps);
   let dx = co;
   let dy = si;
-  const result: Path64 = [{ x: Math.round(center.x + radiusX), y: center.y }];
+  const result: Path64 = [{ x: InternalClipper.roundAwayFromZero(center.x + radiusX), y: center.y }];
   
   for (let i = 1; i < steps; ++i) {
     result.push({
-      x: Math.round(center.x + radiusX * dx),
-      y: Math.round(center.y + radiusY * dy)
+      x: InternalClipper.roundAwayFromZero(center.x + radiusX * dx),
+      y: InternalClipper.roundAwayFromZero(center.y + radiusY * dy)
     });
     const x = dx * co - dy * si;
     dy = dy * co + dx * si;
@@ -1123,7 +1125,8 @@ export function ellipseD(center: PointD, radiusX: number, radiusY: number = 0, s
   if (radiusX <= 0) return [];
   if (radiusY <= 0) radiusY = radiusX;
   if (steps <= 2) {
-    steps = Math.ceil(Math.PI * Math.sqrt((radiusX + radiusY) / 2));
+    steps = Math.trunc(Math.PI * Math.sqrt((radiusX + radiusY) / 2)); // truncated, as in C++
+    if (steps < 3) steps = 3; // TS: C++ has no minimum
   }
 
   const si = Math.sin(2 * Math.PI / steps);
@@ -1145,12 +1148,20 @@ export function ellipseD(center: PointD, radiusX: number, radiusY: number = 0, s
 }
 
 // Triangulation
-export function triangulate(pp: Paths64, useDelaunay: boolean = true): { result: TriangulateResult, solution: Paths64 } {
-  const d = new Delaunay(useDelaunay);
+// Triangulates non-intersecting outer/hole contours.
+// useDelaunay: optimize interior edges using Delaunay legalization (default true).
+// preserveCollinear: keep every boundary segment, or return fail where one can't
+// be kept (default false).
+/** @deprecated Triangulation will be removed in the next release. See https://github.com/countertype/clipper2-ts/issues/41 */
+export function triangulate(pp: Paths64, useDelaunay: boolean = true, preserveCollinear: boolean = false): { result: TriangulateResult, solution: Paths64 } {
+  const d = new Delaunay(useDelaunay, preserveCollinear);
   return d.execute(pp);
 }
 
-export function triangulateD(pp: PathsD, decPlaces: number, useDelaunay: boolean = true): { result: TriangulateResult, solution: PathsD } {
+// decPlaces: decimal precision for the integer grid, clamped to 0..8.
+// useDelaunay and preserveCollinear: as for triangulate, on the rounded coordinates.
+/** @deprecated Triangulation will be removed in the next release. See https://github.com/countertype/clipper2-ts/issues/41 */
+export function triangulateD(pp: PathsD, decPlaces: number, useDelaunay: boolean = true, preserveCollinear: boolean = false): { result: TriangulateResult, solution: PathsD } {
   let scale: number;
   if (decPlaces <= 0) scale = 1.0;
   else if (decPlaces > 8) scale = Math.pow(10.0, 8.0);
@@ -1158,7 +1169,7 @@ export function triangulateD(pp: PathsD, decPlaces: number, useDelaunay: boolean
 
   const pp64 = scalePaths64(pp, scale);
 
-  const d = new Delaunay(useDelaunay);
+  const d = new Delaunay(useDelaunay, preserveCollinear);
   const { result, solution: sol64 } = d.execute(pp64);
 
   let solution: PathsD;

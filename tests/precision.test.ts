@@ -158,18 +158,22 @@ describe('InternalClipper precision with large safe integers', () => {
     expect(areaOutPt(outrec.pts)).toBe(expected);
   });
 
-  test('perpendicDistFromLineSqrdGreaterThanQuarter matches BigInt for large coordinates', () => {
+  test('perpendicDistFromLineSqrdGreaterThan matches BigInt for large coordinates', () => {
     const line1: Point64 = { x: 0, y: 0 };
     const line2: Point64 = { x: 360_000_000, y: 0 };
     const ptNear: Point64 = { x: 180_000_000, y: 0 };
     const ptFar: Point64 = { x: 180_000_000, y: 1 };
     const clipper = new Clipper64() as unknown as {
-      perpendicDistFromLineSqrdGreaterThanQuarter: (p: Point64, a: Point64, b: Point64) => boolean;
+      perpendicDistFromLineSqrdGreaterThan:
+        (p: Point64, a: Point64, b: Point64, limitNum: number, limitDen: number) => boolean;
     };
-    expect(clipper.perpendicDistFromLineSqrdGreaterThanQuarter(ptNear, line1, line2))
+    // 1/4 is the limit used by checkJoinLeft, 7/20 the one used by checkJoinRight
+    expect(clipper.perpendicDistFromLineSqrdGreaterThan(ptNear, line1, line2, 1, 4))
       .toBe(perpendicDistGreaterThanQuarterBigInt(ptNear, line1, line2));
-    expect(clipper.perpendicDistFromLineSqrdGreaterThanQuarter(ptFar, line1, line2))
+    expect(clipper.perpendicDistFromLineSqrdGreaterThan(ptFar, line1, line2, 1, 4))
       .toBe(perpendicDistGreaterThanQuarterBigInt(ptFar, line1, line2));
+    expect(clipper.perpendicDistFromLineSqrdGreaterThan(ptNear, line1, line2, 7, 20)).toBe(false);
+    expect(clipper.perpendicDistFromLineSqrdGreaterThan(ptFar, line1, line2, 7, 20)).toBe(true);
   });
 
   test('pointInPolygon handles large safe coordinates', () => {
