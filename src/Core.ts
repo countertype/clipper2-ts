@@ -97,48 +97,41 @@ export type ZCallbackD = (
 const maxSafeInteger = Number.MAX_SAFE_INTEGER;
 const maxDeltaForSafeProduct = Math.floor(Math.sqrt(maxSafeInteger));
 
-function isSafeProduct(a: number, b: number): boolean {
-  if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b)) return false;
-  if (a === 0 || b === 0) return true;
-  return Math.abs(a) <= maxSafeInteger / Math.abs(b);
+// the rounding error of the product p = a * b (Dekker's product, with Veltkamp's split)
+function productError(a: number, b: number, p: number): number {
+  let t = 134217729 * a; // 2^27 + 1
+  const ah = t - (t - a), al = a - ah;
+  t = 134217729 * b;
+  const bh = t - (t - b), bl = b - bh;
+  return al * bl - (((p - ah * bh) - al * bh) - ah * bl);
 }
 
-function isSafeSum(a: number, b: number): boolean {
-  return Math.abs(a) + Math.abs(b) <= maxSafeInteger;
-}
-
+// a * b - c * d. Below 2^26 the products and their difference are exact. Above that
+// the rounding errors of the products and of their difference are added back, which
+// gives the exact value to within rounding.
 function safeMultiplyDifference(a: number, b: number, c: number, d: number): number {
-  if (isSafeProduct(a, b) && isSafeProduct(c, d)) {
-    const prod1 = a * b;
-    const prod2 = c * d;
-    if (isSafeSum(prod1, prod2)) {
-      return prod1 - prod2;
-    }
+  if (Math.abs(a) < 67108864 && Math.abs(b) < 67108864 &&
+    Math.abs(c) < 67108864 && Math.abs(d) < 67108864) {
+    return (a * b) - (c * d);
   }
-
-  if (Number.isSafeInteger(a) && Number.isSafeInteger(b) &&
-    Number.isSafeInteger(c) && Number.isSafeInteger(d)) {
-    return Number((BigInt(a) * BigInt(b)) - (BigInt(c) * BigInt(d)));
-  }
-
-  return (a * b) - (c * d);
+  const p = a * b, q = c * d;
+  const s = p - q;
+  const bv = p - s;
+  const sErr = (p - (s + bv)) + (bv - q);
+  return s + (sErr + (productError(a, b, p) - productError(c, d, q)));
 }
 
+// a * b + c * d, as safeMultiplyDifference
 function safeMultiplySum(a: number, b: number, c: number, d: number): number {
-  if (isSafeProduct(a, b) && isSafeProduct(c, d)) {
-    const prod1 = a * b;
-    const prod2 = c * d;
-    if (isSafeSum(prod1, prod2)) {
-      return prod1 + prod2;
-    }
+  if (Math.abs(a) < 67108864 && Math.abs(b) < 67108864 &&
+    Math.abs(c) < 67108864 && Math.abs(d) < 67108864) {
+    return (a * b) + (c * d);
   }
-
-  if (Number.isSafeInteger(a) && Number.isSafeInteger(b) &&
-    Number.isSafeInteger(c) && Number.isSafeInteger(d)) {
-    return Number((BigInt(a) * BigInt(b)) + (BigInt(c) * BigInt(d)));
-  }
-
-  return (a * b) + (c * d);
+  const p = a * b, q = c * d;
+  const s = p + q;
+  const bv = s - p;
+  const sErr = (p - (s - bv)) + (q - bv);
+  return s + (sErr + (productError(a, b, p) + productError(c, d, q)));
 }
 
 // BigInt constants — avoid BigInt literal syntax (0n, 4n, etc.) to sidestep
@@ -400,10 +393,8 @@ function roundToEven(value: number): number {
   return r;
 }
 
-// Rounds half away from zero, as std::round in C++ and MidpointRounding.AwayFromZero
-// in C# do when a floating point coordinate becomes an integer one. Math.round rounds
-// a negative half up (-2.5 to -2), which shifts results at negative coordinates, and
-// returns -0 for values between -0.5 and 0.
+// Rounds half away from zero, as std::round does in C++. Math.round rounds a negative
+// half up (-2.5 to -2) and returns -0 for values between -0.5 and 0.
 function roundAwayFromZero(value: number): number {
   // (adding 0 turns -0 into 0, including for an input of -0)
   return value > 0 ? Math.round(value) : -Math.round(-value) + 0;
@@ -455,8 +446,7 @@ function getLineIntersectPt(
   } else if (t >= 1.0) {
     return { x: ln1b.x, y: ln1b.y, z: (ln1b.z || 0) };
   } else {
-    // rounding rather than truncating toward zero keeps 'ip' within half a unit
-    // of the crossing; truncating could push it off its segment
+    // rounded, so that 'ip' stays within half a unit of the crossing
     // (Math.round gives -0 for values from -0.5 to -0; adding 0 makes that 0)
     return {
       x: roundToEven(ln1a.x + t * dx1) + 0,

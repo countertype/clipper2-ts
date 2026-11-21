@@ -26,8 +26,7 @@ function warnDeprecated(): void {
       throwDeprecation?: boolean;
     }
   }).process;
-  // under --throw-deprecation the warning would be thrown on a later tick, where no caller
-  // can catch it, and triangulation still works in this release
+  // under --throw-deprecation the warning would be thrown where no caller can catch it
   if (proc && typeof proc.emitWarning === 'function' && !proc.throwDeprecation) {
     // in Node this can be silenced with --no-deprecation or traced with --trace-deprecation
     proc.emitWarning(message, { type: 'DeprecationWarning', code: 'CLIPPER2TS_TRIANGULATION' });
@@ -106,10 +105,9 @@ export class Delaunay {
   private readonly _edgesA: (Edge | null)[] = [null, null, null];
   private readonly _edgesB: (Edge | null)[] = [null, null, null];
 
-  // Unrestorable constraints make execute return fail; retry without preservation
-  // only if simplified output is acceptable, never for a cap requiring conformity.
   // delaunay: optimize interior edges using Delaunay legalization (default true).
-  // preserveCollinear: retain every nonzero boundary segment exactly (default false).
+  // preserveCollinear: keep every boundary segment, or make execute return fail
+  // where one can't be kept (default false).
   constructor(delaunay: boolean = true, preserveCollinear: boolean = false) {
     warnDeprecated(); // once per process
     this.useDelaunay = delaunay;
@@ -617,8 +615,7 @@ export class Delaunay {
     } else {
       if (!delaunay || cpsA === cpsB) return;
       const ictResult = this.inCircleTest(vertA.pt, edge.vL.pt, edge.vR.pt, vertB.pt);
-      if (ictResult === 0 ||
-        (this.rightTurning(vertA.pt, edge.vL.pt, edge.vR.pt) === (ictResult < 0))) return;
+      if (ictResult === 0 || ((cpsA > 0) === (ictResult < 0))) return;
     }
 
     edge.vL = vertA;
@@ -689,8 +686,12 @@ export class Delaunay {
     // Iterate until no blocking edge is found for the current bridge vBest->vAbove.
     // We must restart the search whenever vBest changes because edges checked earlier
     // might now intersect the new bridge.
+    // nb: each restart moves the bridge to another vertex, so more restarts than
+    // vertices means edges that block each other, and no bridge exists
+    let restarts = this.allVertices.length;
     let changed = true;
     while (changed) {
+      if (restarts-- < 0) return null;
       changed = false;
       e = this.firstActive;
       while (e !== null) {
@@ -733,16 +734,21 @@ export class Delaunay {
 
   // Returns an endpoint of e that lies strictly inside the segment a-b, or null.
   private vertexOnSegment(e: Edge, a: Vertex2, b: Vertex2): Vertex2 | null {
-    for (const w of [e.vB, e.vT]) {
-      if (w === a || w === b) continue;
-      if (this.crossProductSign(a.pt, b.pt, w.pt) !== 0) continue;
-      const p = w.pt;
-      const inX = (p.x > a.pt.x) === (p.x < b.pt.x) && p.x !== a.pt.x && p.x !== b.pt.x;
-      const inY = (p.y > a.pt.y) === (p.y < b.pt.y) && p.y !== a.pt.y && p.y !== b.pt.y;
-      // collinear and inside the bounding range of the segment on the non-degenerate axis
-      if ((a.pt.x !== b.pt.x && inX) || (a.pt.x === b.pt.x && inY)) return w;
-    }
+    if (this.isInsideSegment(e.vB, a, b)) return e.vB;
+    if (this.isInsideSegment(e.vT, a, b)) return e.vT;
     return null;
+  }
+
+  private isInsideSegment(w: Vertex2, a: Vertex2, b: Vertex2): boolean {
+    if (w === a || w === b) return false;
+    const p = w.pt, pa = a.pt, pb = b.pt;
+    // inside the bounding range of the segment on its non-degenerate axis, and collinear
+    if (pa.x !== pb.x) {
+      if ((p.x > pa.x) !== (p.x < pb.x) || p.x === pa.x || p.x === pb.x) return false;
+    } else if ((p.y > pa.y) !== (p.y < pb.y) || p.y === pa.y || p.y === pb.y) {
+      return false;
+    }
+    return this.crossProductSign(pa, pb, p) === 0;
   }
 
   private doTriangulateLeft(edge: Edge, pivot: Vertex2, minY: number): void {
@@ -872,9 +878,7 @@ export class Delaunay {
     // if necessary fix path orientation because the algorithm 
     // expects clockwise outer paths and counter-clockwise inner paths
     if (this.lowermostVertex!.innerLM) {
-      // the orientation of added paths must be wrong, so add them again
-      // reversed. (Flipping innerLM flags and edge kinds in place, as the
-      // reference does, leaves horizontals with collinear vertices wrong.)
+      // the orientation of added paths must be wrong, so add them again reversed
       this.cleanUp();
       const reversed = paths.map(p => [...p].reverse());
       if (!this.addPaths(reversed)) {
@@ -1041,10 +1045,8 @@ export class Delaunay {
     return (cross * cross) / denom;
   }
 
-  // Always uses the exact orientation-based test. The double-precision
-  // parametric version (as in C++) misclassifies segments that touch at a
-  // vertex lying exactly on the other segment, which left overlapping
-  // triangles in axis-aligned input.
+  // TS: always the exact orientation test. The parametric version in C++ misclassifies
+  // segments that touch at a vertex lying on the other segment.
   private segsIntersect(s1a: Point64, s1b: Point64, s2a: Point64, s2b: Point64): IntersectKind {
     return Delaunay.segsIntersect(s1a, s1b, s2a, s2b);
   }
@@ -1227,6 +1229,12 @@ export class Delaunay {
     if ((s1a.x === s2a.x && s1a.y === s2a.y) ||
         (s1b.x === s2a.x && s1b.y === s2a.y) ||
         (s1b.x === s2b.x && s1b.y === s2b.y)) return IntersectKind.none;
+
+    // TS: segments whose bounds are apart can't cross (nor is collinear reported for them)
+    if ((s1a.x < s1b.x ? s1b.x : s1a.x) < (s2a.x < s2b.x ? s2a.x : s2b.x) ||
+        (s2a.x < s2b.x ? s2b.x : s2a.x) < (s1a.x < s1b.x ? s1a.x : s1b.x) ||
+        (s1a.y < s1b.y ? s1b.y : s1a.y) < (s2a.y < s2b.y ? s2a.y : s2b.y) ||
+        (s2a.y < s2b.y ? s2b.y : s2a.y) < (s1a.y < s1b.y ? s1a.y : s1b.y)) return IntersectKind.none;
 
     const d1 = adaptiveOrient2dSign(s2a.x, s2a.y, s2b.x, s2b.y, s1a.x, s1a.y);
     const d2 = adaptiveOrient2dSign(s2a.x, s2a.y, s2b.x, s2b.y, s1b.x, s1b.y);

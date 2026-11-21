@@ -47,11 +47,8 @@ function exactArea(path: Path64): ExactArea {
   }
 
   // TS: C++ always sums in 128 bits. Here the area is taken relative to the path's own
-  // corner, which doesn't change it, so the size of the products depends on the path's
-  // extent and not on how far it is from the origin. The shoelace sum is then exact in
-  // doubles while every partial sum stays a safe integer, which covers most paths.
-  // Coordinates that are not safe integers (the library's contract, but not checked
-  // here) are summed in doubles too, as InternalClipper.area does.
+  // corner, so the sum is exact in doubles while every partial sum stays a safe integer.
+  // Coordinates that are not safe integers are summed in doubles too.
   const span = Math.max(maxX - minX, maxY - minY);
   if (!allSafe || 2 * cnt * span * span < Number.MAX_SAFE_INTEGER) {
     let sum = 0;
@@ -66,10 +63,8 @@ function exactArea(path: Path64): ExactArea {
     return { sign: sum > 0 ? 1 : 0, twiceMagnitude: sum };
   }
 
-  // The products no longer fit a double, so BigInt carries the sum, as intermediate
-  // arithmetic only. The sign is exact. The magnitude is returned as a number: exact
-  // up to 2^53, the nearest double above that, where two paths would have to agree
-  // to 16 digits without being equal for their order to differ from C++.
+  // otherwise BigInt carries the sum. The sign is exact, and the magnitude is exact
+  // up to 2^53 and the nearest double above that.
   let twice = BigInt(0);
   for (let i = 0, j = cnt - 1; i < cnt; j = i++) {
     twice += BigInt(path[j].x) * BigInt(path[i].y) - BigInt(path[i].x) * BigInt(path[j].y);
@@ -447,10 +442,8 @@ export class ClipperOffset {
     // A group wound against another holds that group's holes when its largest path lies inside one
     // of that group's outers, and the innermost enclosing path decides, so a group inside another
     // group's hole stays an island. A hole that no outer at least as large encloses is stray and
-    // contributes nothing, since offsetting it alone would leave the loops its concave joins add.
-    // Each decision depends only on paths at least as large, so settling from the largest path down,
-    // with a group's own largest path first among equals, settles everything in one pass whatever
-    // the AddPaths order. Without mixed orientations no group turns into holes, so any order will do.
+    // contributes nothing. Each decision depends only on paths at least as large, so the paths are
+    // settled from the largest down, with a group's own largest path first among equals.
     const cnt = sizes.length;
     const order = new Array<number>(cnt);
     for (let i = 0; i < cnt; i++) order[i] = i;
@@ -1118,9 +1111,7 @@ export class ClipperOffset {
     if (radiusY <= 0) radiusY = radiusX;
     if (steps <= 2) {
       steps = Math.trunc(Math.PI * Math.sqrt((radiusX + radiusY) / 2)); // truncated, as in C++
-      // TS: C++ returns a line or a point for a radius under 1; a triangle is the least
-      // that encloses area
-      if (steps < 3) steps = 3;
+      if (steps < 3) steps = 3; // TS: C++ has no minimum
     }
 
     const si = Math.sin(2 * Math.PI / steps);

@@ -453,10 +453,8 @@ export const ClipperEngine = {
       if (!isOpen && prevV!.pt.x === v0!.pt.x && prevV!.pt.y === v0!.pt.y) prevV = prevV!.prev;
       prevV!.next = v0;
       v0!.prev = prevV;
-      // a closed path needs 3 vertices (C# let a 2 vertex path through, and crossing
-      // other paths it added area to the solution)
-      // TS: the ring is tested once its closing duplicate is gone, so [A, B, A] is
-      // skipped too, which C++ lets through
+      // a closed path needs 3 vertices
+      // TS: tested after the closing duplicate is dropped, so [A, B, A] is skipped too
       if (!isOpen && v0!.next === v0!.prev) continue;
 
       // OK, we have a valid path
@@ -756,10 +754,8 @@ export class ClipperBase {
     const zCallback = this.zCallbackInternal;
     if (!zCallback) return;
 
-    // TS: an output point can be the very object of an input vertex (points are
-    // shared, not copied as in C++), so give it its own point before writing z.
-    // Otherwise the callback changes the caller's input and the z of edges
-    // still to be processed.
+    // TS: points are shared with the input, not copied as in C++, so the output
+    // point gets its own copy before z is written
     const intersectPt: Point64 = { x: op.pt.x, y: op.pt.y, z: 0 };
     op.pt = intersectPt;
 
@@ -1140,6 +1136,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
   private insertLocalMinimaIntoAEL(botY: number): void {
     // Add any local minima (if any) at BotY ...
     // NB horizontal local minima edges should contain locMin.vertex.prev
+    let prevLeft: Active | null = null;
     while (this.hasLocMinAtY(botY)) {
       const localMinima = this.popLocalMinima();
       let leftBound: Active | null;
@@ -1202,7 +1199,10 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
 
       let contributing: boolean;
       leftBound!.isLeftBound = true;
-      this.insertLeftEdge(leftBound!);
+      // minima at one y come in ascending x, so the last left bound is a place to start from
+      this.insertLeftEdge(leftBound!,
+        prevLeft !== null && prevLeft.curX < leftBound!.curX ? prevLeft : null);
+      prevLeft = leftBound;
 
       if (!ClipperBase.openPathsEnabled) {
         // Closed-path-only fast path.
@@ -2217,18 +2217,20 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       outrec.pts! : outrec.pts!.next!;
   }
 
-  private insertLeftEdge(ae: Active): void {
+  // TS: 'after' is an edge already in the AEL with a smaller curX, or null. The AEL is
+  // ordered by curX, so the search can start there and finds the same place.
+  private insertLeftEdge(ae: Active, after: Active | null): void {
     if (this.actives === null) {
       ae.prevInAEL = null;
       ae.nextInAEL = null;
       this.actives = ae;
-    } else if (!this.isValidAelOrder(this.actives, ae)) {
+    } else if (after === null && !this.isValidAelOrder(this.actives, ae)) {
       ae.prevInAEL = null;
       ae.nextInAEL = this.actives;
       this.actives.prevInAEL = ae;
       this.actives = ae;
     } else {
-      let ae2 = this.actives;
+      let ae2 = after !== null ? after : this.actives;
       while (ae2.nextInAEL !== null && this.isValidAelOrder(ae2.nextInAEL, ae)) {
         ae2 = ae2.nextInAEL;
       }
@@ -2574,7 +2576,7 @@ protected newOutRec(): OutRec {
       ((ae.bot.y > pt.y) || (next.bot.y > pt.y)))  return; // (#490)
 
     if (checkCurrX) {
-      // nb: C++ tests 0.35 here and 0.25 in checkJoinLeft (C# tested 0.25 in both)
+      // nb: C++ tests 0.35 here and 0.25 in checkJoinLeft
       if (this.perpendicDistFromLineSqrdGreaterThan(pt, next.bot, next.top, 7, 20)) return; // > 0.35
     }
     if (!InternalClipper.isCollinear(ae.top, pt, next.top)) return;
@@ -2607,7 +2609,14 @@ protected newOutRec(): OutRec {
       const cross = (a * d) - (c * b);
       return (cross * cross) / ((c * c) + (d * d)) > limit;
     }
-    // Large coordinates: use BigInt for precision
+    // TS: crossProduct is accurate to rounding, so doubles settle this unless the two
+    // sides are within rounding error of each other
+    const crossD = InternalClipper.crossProduct(line1, pt, line2);
+    const crossSqD = crossD * crossD;
+    const scaled = limit * ((c * c) + (d * d));
+    if (crossSqD > scaled * 1.000000000001) return true;
+    if (crossSqD < scaled * 0.999999999999) return false;
+    // too close to call: use BigInt for precision
     if (Number.isSafeInteger(a) && Number.isSafeInteger(b) &&
         Number.isSafeInteger(c) && Number.isSafeInteger(d)) {
       const cross = (BigInt(a) * BigInt(d)) - (BigInt(c) * BigInt(b));
@@ -3362,7 +3371,7 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
   // dropped. But when it lies inside the remainder it is a hole the remainder
   // already covers (the loop's -1 cancels the remainder's +1): dropping it
   // fills that hole. Keep such a loop as its own (hole) path.
-  if (absDoubleArea2 < B1) return; // C++ tests this doubled area against 1 too
+  if (absDoubleArea2 < B1) return; // as in C++
   const isHoleOfRemainder = !(absDoubleArea2 > absDoubleArea1) &&
     ((doubleArea2 > B0) !== (doubleArea1 > B0));
   if (isHoleOfRemainder &&
@@ -3568,8 +3577,8 @@ public addPaths(paths: Paths64, polytype: PathType, isOpen: boolean = false): vo
       // (an earlier execute into a PolyTree on this clipper must not carry over)
       this.usingPolytree = false;
 
-      // an exception (from a Z callback, say) escapes execute, as in C++; C# caught
-      // it and returned false. Either way the clipper is left clean for the next call
+      // an exception (from a Z callback, say) escapes execute, as in C++, and the
+      // clipper is still left clean for the next call
       try {
         this.executeInternal(clipType, fillRule);
         this.buildPaths(solutionClosed, solutionOpen || []);
