@@ -47,20 +47,56 @@ function exactArea(path: Path64): ExactArea {
   }
 
   // TS: C++ always sums in 128 bits. Here the area is taken relative to the path's own
-  // corner, so the sum is exact in doubles while every partial sum stays a safe integer.
+  // corner. With a span below 2^26 every term is exact in doubles, and so is the sum
+  // for as long as it stays a safe integer, which is checked as it goes.
   // Coordinates that are not safe integers are summed in doubles too.
   const span = Math.max(maxX - minX, maxY - minY);
-  if (!allSafe || 2 * cnt * span * span < Number.MAX_SAFE_INTEGER) {
+  if (!allSafe || span < 67108864) {
+    const limit = allSafe ? Number.MAX_SAFE_INTEGER : Infinity;
     let sum = 0;
     let px = path[cnt - 1].x - minX, py = path[cnt - 1].y - minY;
-    for (let i = 0; i < cnt; i++) {
+    let i = 0;
+    for (; i < cnt; i++) {
       const x = path[i].x - minX, y = path[i].y - minY;
       sum += px * y - x * py;
+      if (sum > limit || sum < -limit) break;
       px = x;
       py = y;
     }
-    if (sum < 0) return { sign: -1, twiceMagnitude: -sum };
-    return { sign: sum > 0 ? 1 : 0, twiceMagnitude: sum };
+    if (i === cnt) {
+      if (sum < 0) return { sign: -1, twiceMagnitude: -sum };
+      return { sign: sum > 0 ? 1 : 0, twiceMagnitude: sum };
+    }
+  }
+
+  // above that the terms round, so their rounding errors are summed beside them. The
+  // errors are whole numbers, and while their sum stays a safe integer the two sums
+  // together are the exact area.
+  if (allSafe) {
+    const limit = Number.MAX_SAFE_INTEGER;
+    let sum = 0, err = 0;
+    let px = path[cnt - 1].x - minX, py = path[cnt - 1].y - minY;
+    let i = 0;
+    for (; i < cnt; i++) {
+      const x = path[i].x - minX, y = path[i].y - minY;
+      const p = px * y, q = x * py;
+      const d = p - q;
+      let bv = p - d;
+      err += InternalClipper.productError(px, y, p) - InternalClipper.productError(x, py, q) +
+        ((p - (d + bv)) + (bv - q));
+      const s = sum + d;
+      bv = s - sum;
+      err += (sum - (s - bv)) + (d - bv);
+      sum = s;
+      if (err > limit || err < -limit) break;
+      px = x;
+      py = y;
+    }
+    if (i === cnt) {
+      const twice = sum + err;
+      if (twice < 0) return { sign: -1, twiceMagnitude: -twice };
+      return { sign: twice > 0 ? 1 : 0, twiceMagnitude: twice };
+    }
   }
 
   // otherwise BigInt carries the sum. The sign is exact, and the magnitude is exact

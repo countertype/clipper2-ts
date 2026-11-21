@@ -673,6 +673,7 @@ export const InternalClipper = {
   maxSafeCoordinateForScale,
   checkSafeScaleValue,
   ensureSafeInteger,
+  productError,
   crossProduct,
   crossProductSign,
   checkPrecision,
