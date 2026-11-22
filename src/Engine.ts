@@ -1711,13 +1711,16 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
 
   // 'owner' is given only during PolyTree nesting, when op2 is owner.pts and
   // the ring no longer changes, so its cleaned path can be kept on the owner.
-  protected path1InsidePath2(op1: OutPt, op2: OutPt, owner?: OutRec): boolean {
+  // 'index', when given, is the owner's StripeIndex and locates points in op2.
+  protected path1InsidePath2(
+    op1: OutPt, op2: OutPt, owner?: OutRec, index: StripeIndex | null = null
+  ): boolean {
     // we need to make some accommodation for rounding errors
     // so we won't jump if the first vertex is found outside
     let pip = PointInPolygonResult.IsOn;
     let op = op1;
     do {
-      switch (this.pointInOpPolygon(op.pt, op2)) {
+      switch (index !== null ? index.pointInPolygon(op.pt) : this.pointInOpPolygon(op.pt, op2)) {
         case PointInPolygonResult.IsOutside:
           if (pip === PointInPolygonResult.IsOutside) return false;
           pip = PointInPolygonResult.IsOutside;
@@ -1746,8 +1749,8 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     return path;
   }
 
-  // path1InsidePath2 variant using a StripeIndex cached on the owner. Small owners
-  // and the ambiguity fallback defer to the brute-force version, so results match.
+  // path1InsidePath2 with a StripeIndex cached on the owner. Small owners are
+  // located by brute force, so results match.
   protected path1InsideOwner(op1: OutPt, owner: OutRec): boolean {
     if (owner.path.length <= this.pipIndexThreshold) {
       return this.path1InsidePath2(op1, owner.pts!, owner);
@@ -1761,28 +1764,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     }
 
     // Empty means the index declined this ring (see StripeIndex.build).
-    if (index.empty) return this.path1InsidePath2(op1, owner.pts!, owner);
-
-    let pip = PointInPolygonResult.IsOn;
-    let op = op1;
-    do {
-      switch (index.pointInPolygon(op.pt)) {
-        case PointInPolygonResult.IsOutside:
-          if (pip === PointInPolygonResult.IsOutside) return false;
-          pip = PointInPolygonResult.IsOutside;
-          break;
-        case PointInPolygonResult.IsInside:
-          if (pip === PointInPolygonResult.IsInside) return true;
-          pip = PointInPolygonResult.IsInside;
-          break;
-        default:
-          break;
-      }
-      op = op.next!;
-    } while (op !== op1);
-
-    // ambiguous, defer to the exact cleaned-path test
-    return InternalClipper.path2ContainsPath1(this.getCleanPath(op1), this.ownerCleanPath(owner)); // (#973)
+    return this.path1InsidePath2(op1, owner.pts!, owner, index.empty ? null : index);
   }
 
   private pointInOpPolygon(pt: Point64, op: OutPt): PointInPolygonResult {
@@ -3772,7 +3754,7 @@ export class ClipperD extends ClipperBase {
         }
       }
       
-      return true;
+      return this.succeeded;
     } else {
       // PolyTreeD version
       const polytree = solutionOrTree;
@@ -3789,7 +3771,7 @@ export class ClipperD extends ClipperBase {
       } finally {
         this.clearSolutionOnly();
       }
-      return true;
+      return this.succeeded;
     }
   }
 }

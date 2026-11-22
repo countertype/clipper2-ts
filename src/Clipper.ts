@@ -1096,29 +1096,7 @@ export function pointInPolygonD(pt: PointD, polygon: PathD, precision: number = 
 }
 
 export function ellipse(center: Point64, radiusX: number, radiusY: number = 0, steps: number = 0): Path64 {
-  if (radiusX <= 0) return [];
-  if (radiusY <= 0) radiusY = radiusX;
-  if (steps <= 2) {
-    steps = Math.trunc(Math.PI * Math.sqrt((radiusX + radiusY) / 2)); // truncated, as in C++
-    if (steps < 3) steps = 3; // TS: C++ has no minimum
-  }
-
-  const si = Math.sin(2 * Math.PI / steps);
-  const co = Math.cos(2 * Math.PI / steps);
-  let dx = co;
-  let dy = si;
-  const result: Path64 = [{ x: InternalClipper.roundAwayFromZero(center.x + radiusX), y: center.y }];
-  
-  for (let i = 1; i < steps; ++i) {
-    result.push({
-      x: InternalClipper.roundAwayFromZero(center.x + radiusX * dx),
-      y: InternalClipper.roundAwayFromZero(center.y + radiusY * dy)
-    });
-    const x = dx * co - dy * si;
-    dy = dy * co + dx * si;
-    dx = x;
-  }
-  return result;
+  return ClipperOffset.ellipse(center, radiusX, radiusY, steps);
 }
 
 export function ellipseD(center: PointD, radiusX: number, radiusY: number = 0, steps: number = 0): PathD {

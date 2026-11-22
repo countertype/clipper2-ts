@@ -49,3 +49,18 @@ test('triangulate returns when two edges block each other\'s bridge', () => {
   expect(triangulate(paths).result).toBe(TriangulateResult.fail);
   expect(triangulate(paths, false).result).toBe(TriangulateResult.fail);
 });
+
+// A path with every vertex on one sloped or vertical line kept addPath looking for a
+// local minimum for ever. C++ returns from that loop once it comes back round.
+test('an entirely collinear path is skipped', () => {
+  const square = Clipper.makePath([0,0, 100,0, 100,100, 0,100]);
+  const flats = [[200,10, 210,20, 220,30], [200,10, 200,20, 200,30], [200,10, 250,10, 300,10]];
+
+  for (const flat of flats) {
+    const { result, solution } = triangulate([square, Clipper.makePath(flat)]);
+    expect(result).toBe(TriangulateResult.success);
+    expect(solution).toHaveLength(2);
+    // alone, there is nothing to triangulate
+    expect(triangulate([Clipper.makePath(flat)]).result).toBe(TriangulateResult.noPolygons);
+  }
+});

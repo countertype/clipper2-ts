@@ -1099,7 +1099,8 @@ export class ClipperOffset {
       switch (endType) {
         case EndType.Polygon: {
           // a path without area can only grow, so a negative delta erodes it to nothing
-          const flat = isFlat(pathIn);
+          // (a flat path has no area, so only those are scanned)
+          const flat = group.areas[pathIdx].sign === 0 && isFlat(pathIn);
           if (flat && this.deltaCallback === null && this.delta < 0) break;
 
           this.offsetPolygon(group, pathIn);

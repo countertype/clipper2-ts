@@ -174,7 +174,7 @@ export class Delaunay {
     let i = i0;
     while (this.crossProductSign(path[iPrev], path[i], path[iNext]) === 0) {
       i = Delaunay.findLocMinIdx(path, len, i);
-      if (i < 0) return;
+      if (i < 0 || i === i0) return; // an entirely collinear path
       iPrev = Delaunay.prev(i, len);
       while (path[iPrev].x === path[i].x && path[iPrev].y === path[i].y)
         iPrev = Delaunay.prev(iPrev, len);
@@ -872,6 +872,7 @@ export class Delaunay {
     this.updateFastMath(paths);
 
     if (!this.addPaths(paths)) {
+      this.cleanUp();
       return { result: TriangulateResult.noPolygons, solution: sol };
     }
 
@@ -882,6 +883,7 @@ export class Delaunay {
       this.cleanUp();
       const reversed = paths.map(p => [...p].reverse());
       if (!this.addPaths(reversed)) {
+        this.cleanUp();
         return { result: TriangulateResult.noPolygons, solution: sol };
       }
     }
