@@ -633,7 +633,9 @@ function icPointInPolygon(pt: Point64, polygon: Path64): PointInPolygonResult {
 
 // Coordinates up to this size, taken relative to an origin, can be doubled and
 // summed in pairs without rounding.
-const maxMidpointSpan = maxSafeInteger / 8;
+// (the largest value formed is a doubled sum less a doubled coordinate of the other sign,
+// four times this size)
+const maxMidpointSpan = maxSafeInteger / 4;
 
 // icPointInPolygon for a point given in doubled coordinates (px, py) against a
 // polygon that is not doubled, so the midpoint of an integer segment can be

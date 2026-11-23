@@ -73,8 +73,9 @@ function minkScalePath64(path: PathD, scale: number): Path64 {
       InternalClipper.checkSafeScaleValue(pt.x, maxAbs, "Minkowski.scalePath64");
       InternalClipper.checkSafeScaleValue(pt.y, maxAbs, "Minkowski.scalePath64");
       result.push({
-        x: InternalClipper.roundToEven(pt.x * scale),
-        y: InternalClipper.roundToEven(pt.y * scale)
+        // (half away from zero, as every other scaling to integers and as in C++)
+        x: InternalClipper.roundAwayFromZero(pt.x * scale),
+        y: InternalClipper.roundAwayFromZero(pt.y * scale)
       });
   }
   return result;

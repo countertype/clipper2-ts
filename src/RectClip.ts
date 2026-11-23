@@ -289,8 +289,9 @@ export class RectClip64 {
     const ip = InternalClipper.getLineIntersectPt(p1, p2, p3, p4);
     if (ip === null) return null;
 
-    // All callers in this unit intersect against rectangle sides, so keep
+    // TS: all callers in this unit intersect against rectangle sides, so keep
     // the constrained coordinate exact and leave the free coordinate as-is.
+    // C++ returns the point as computed, which only differs near 2^51 and above.
     if (p3.x === p4.x) ip.x = p3.x;
     else if (p3.y === p4.y) ip.y = p3.y;
     return ip;
@@ -346,7 +347,6 @@ export class RectClip64 {
             ip = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[3]);
             if (ip !== null) { r.intersects = true; r.point = ip; r.newLocation = Location.left; return r; }
           }
-          if (p.x <= rectPath[1].x) { r.intersects = false; return r; }
           ip = RectClip64.getSegmentIntersection(p, p2, rectPath[1], rectPath[2]);
           if (ip !== null) { r.intersects = true; r.point = ip; r.newLocation = Location.right; return r; }
           r.intersects = false; return r;
@@ -360,7 +360,6 @@ export class RectClip64 {
             ip = RectClip64.getSegmentIntersection(p, p2, rectPath[0], rectPath[3]);
             if (ip !== null) { r.intersects = true; r.point = ip; r.newLocation = Location.left; return r; }
           }
-          if (p.x <= rectPath[2].x) { r.intersects = false; return r; }
           ip = RectClip64.getSegmentIntersection(p, p2, rectPath[1], rectPath[2]);
           if (ip !== null) { r.intersects = true; r.point = ip; r.newLocation = Location.right; return r; }
           r.intersects = false; return r;

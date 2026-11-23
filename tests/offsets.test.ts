@@ -429,4 +429,12 @@ describe('Polygon Offset Tests', () => {
       ]);
     });
   });
+  test('every join type offsets a square whose result passes the safe integer limit', () => {
+    // the square join used to throw here where the others did not
+    const o = Number.MAX_SAFE_INTEGER - 1004;
+    const square: Paths64 = [[{ x: o, y: o }, { x: o + 1000, y: o }, { x: o + 1000, y: o + 1000 }, { x: o, y: o + 1000 }]];
+    for (const joinType of [JoinType.Miter, JoinType.Square, JoinType.Round, JoinType.Bevel]) {
+      expect(Clipper.inflatePaths(square, 10, joinType, EndType.Polygon)).toHaveLength(1);
+    }
+  });
 });

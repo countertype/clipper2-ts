@@ -93,6 +93,9 @@ function exactArea(path: Path64): ExactArea {
       let bv = p - d;
       err += InternalClipper.productError(px, y, p) - InternalClipper.productError(x, py, q) +
         ((p - (d + bv)) + (bv - q));
+      // (checked after each of the two additions, since err rounds past the limit and the
+      // second could bring a rounded value back inside it)
+      if (err > limit || err < -limit) break;
       const s = sum + d;
       bv = s - sum;
       err += (sum - (s - bv)) + (d - bv);
@@ -779,6 +782,16 @@ export class ClipperOffset {
     this.pathOut.push(pt2);
   }
 
+  // (rounded as the other joins round, without the range check of Point64Utils.fromPointD,
+  // so a square join doesn't throw where the others carry on, and as in C++)
+  private static roundPoint(pt: PointD): Point64 {
+    return {
+      x: InternalClipper.roundAwayFromZero(pt.x),
+      y: InternalClipper.roundAwayFromZero(pt.y),
+      z: pt.z || 0
+    };
+  }
+
   private doSquare(path: Path64, j: number, k: number): void {
     let vec: PointD;
     if (j === k) {
@@ -809,14 +822,14 @@ export class ClipperOffset {
       };
       const pt = ClipperOffset.squareIntersect(pt1, pt2, pt3, pt4, ptQ);
       //get the second intersect point through reflecion
-      this.pathOut.push(Point64Utils.fromPointD(ClipperOffset.reflectPoint(pt, ptQ)));
-      this.pathOut.push(Point64Utils.fromPointD(pt));
+      this.pathOut.push(ClipperOffset.roundPoint(ClipperOffset.reflectPoint(pt, ptQ)));
+      this.pathOut.push(ClipperOffset.roundPoint(pt));
     } else {
       const pt4 = this.getPerpendicD(path[j], this.normals[k]);
       const pt = ClipperOffset.squareIntersect(pt1, pt2, pt3, pt4, ptQ);
-      this.pathOut.push(Point64Utils.fromPointD(pt));
+      this.pathOut.push(ClipperOffset.roundPoint(pt));
       //get the second intersect point through reflecion
-      this.pathOut.push(Point64Utils.fromPointD(ClipperOffset.reflectPoint(pt, ptQ)));
+      this.pathOut.push(ClipperOffset.roundPoint(ClipperOffset.reflectPoint(pt, ptQ)));
     }
   }
 
@@ -1141,8 +1154,8 @@ export class ClipperOffset {
         result.push(lastPt);
       }
     }
-    // (a single point is kept, as in C++)
-    if (isClosedPath && result.length > 1 && Point64Utils.equals(lastPt, result[0])) {
+    // (every closing point equal to the first is dropped, and a single point is kept, as in C++)
+    while (isClosedPath && result.length > 1 && Point64Utils.equals(result[result.length - 1], result[0])) {
       result.pop();
     }
     return result;

@@ -637,6 +637,7 @@ export class PolyPath64 extends PolyPathBase {
 }
 
 export class PolyPathD extends PolyPathBase {
+  // TS: the scale the clipper multiplied by, as in C#; C++ keeps its inverse here
   public scale: number = 1.0;
   private polygon: PathD | null = null;
 
@@ -2218,8 +2219,6 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       outrec.pts! : outrec.pts!.next!;
   }
 
-  // TS: 'after' is an edge already in the AEL with a smaller curX, or null. The AEL is
-  // ordered by curX, so the search can start there and finds the same place.
   // (the search always starts from the first edge, as in C++: joined edges are kept
   // together even out of curX order, so a later starting point can skip the right place)
   private insertLeftEdge(ae: Active): void {
@@ -3661,6 +3660,8 @@ export class ClipperD extends ClipperBase {
 
       const path: Path64 = [];
       if (outrec.isOpen) {
+        // TS: an open path of 3 points is kept, as Clipper64 keeps it; C++ BuildPathD
+        // applies the very small triangle test to open paths too
         if (ClipperBase.buildPath(outrec.pts, this.reverseSolution, true, path)) {
           solutionOpen.push(this.scalePathDFromInt(path, this.invScale));
         }
