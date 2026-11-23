@@ -793,6 +793,74 @@ function path2ContainsPath1(path1: Path64, path2: Path64): boolean {
   return icPointInPolygon(midPt, path2) !== PointInPolygonResult.IsOutside;
 }
 
+// Shared by the public helpers in Clipper.ts and by the offsetter, the engine and
+// Minkowski, so that none of them has to import another for it.
+
+// drops repeated points, and for a closed path the closing points equal to the first.
+// A single point is kept, as in C++.
+export function stripDuplicates64(path: Path64, isClosedPath: boolean): Path64 {
+  const cnt = path.length;
+  const result: Path64 = [];
+  if (cnt === 0) return result;
+
+  let lastPt = path[0];
+  result.push(lastPt);
+  for (let i = 1; i < cnt; i++) {
+    const pt = path[i];
+    if (lastPt.x !== pt.x || lastPt.y !== pt.y) {
+      lastPt = pt;
+      result.push(lastPt);
+    }
+  }
+  while (isClosedPath && result.length > 1 &&
+    result[result.length - 1].x === result[0].x && result[result.length - 1].y === result[0].y) {
+    result.pop();
+  }
+  return result;
+}
+
+export function ellipse64(center: Point64, radiusX: number, radiusY: number = 0, steps: number = 0): Path64 {
+  if (radiusX <= 0) return [];
+  if (radiusY <= 0) radiusY = radiusX;
+  if (steps <= 2) {
+    steps = Math.trunc(Math.PI * Math.sqrt((radiusX + radiusY) / 2)); // truncated, as in C++
+    if (steps < 3) steps = 3; // TS: C++ has no minimum
+  }
+
+  const si = Math.sin(2 * Math.PI / steps);
+  const co = Math.cos(2 * Math.PI / steps);
+  let dx = co;
+  let dy = si;
+  const result: Path64 = [{ x: roundAwayFromZero(center.x + radiusX), y: center.y }];
+
+  for (let i = 1; i < steps; ++i) {
+    result.push({
+      x: roundAwayFromZero(center.x + radiusX * dx),
+      y: roundAwayFromZero(center.y + radiusY * dy)
+    });
+    const x = dx * co - dy * si;
+    dy = dy * co + dx * si;
+    dx = x;
+  }
+  return result;
+}
+
+// scales a path to integers, rounding half away from zero as std::round does in C++,
+// and throws for a coordinate that would pass the safe integer range
+export function scalePathDTo64(path: PathD, scale: number, context: string = "scalePath64"): Path64 {
+  const maxAbs = maxSafeCoordinateForScale(scale);
+  const result: Path64 = [];
+  for (const pt of path) {
+    checkSafeScaleValue(pt.x, maxAbs, context);
+    checkSafeScaleValue(pt.y, maxAbs, context);
+    result.push({
+      x: roundAwayFromZero(pt.x * scale),
+      y: roundAwayFromZero(pt.y * scale)
+    });
+  }
+  return result;
+}
+
 // Plain const object replaces the namespace. External callers use InternalClipper.foo()
 // unchanged; tsc emits a simple object literal instead of an IIFE.
 export const InternalClipper = {
@@ -966,9 +1034,10 @@ export const Rect64Utils = {
       return { x: midX, y: midY };
     }
     // integer division, as in C++ (and as the BigInt branch above does)
+    // (adding 0 turns the -0 that truncating gives between -1 and 0 into 0)
     return {
-      x: Math.trunc((rect.left + rect.right) / 2),
-      y: Math.trunc((rect.top + rect.bottom) / 2)
+      x: Math.trunc((rect.left + rect.right) / 2) + 0,
+      y: Math.trunc((rect.top + rect.bottom) / 2) + 0
     };
   },
 

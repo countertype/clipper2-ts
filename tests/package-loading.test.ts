@@ -1,7 +1,7 @@
 // Exercise the package.json exports map through Node's own loaders rather than
 // Vitest's source resolver. A package can reference itself by name when it has
-// an "exports" field, so no pack or install is needed. Requires a built dist/
-// (the prepare script builds it on npm install).
+// an "exports" field, so no pack or install is needed. Requires a built dist/,
+// which tests/build-dist.ts rebuilds from the current source before each test run.
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

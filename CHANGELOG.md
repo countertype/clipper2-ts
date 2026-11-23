@@ -12,6 +12,8 @@ All changes to this project will be documented in this file
 
 - `Triangulation`: opt-in `preserveCollinear` for `triangulate`, `triangulateD` and `Delaunay`, which keeps every boundary segment or fails ([#43](https://github.com/countertype/clipper2-ts/pull/43))
 
+- `Clipper`: `rectClipD` and `rectClipLinesD`, which always clip decimal paths at a precision; `unionD(subject, fillRule, precision)`; a `decimalPlaces` argument for `minkowskiSumD` and `minkowskiDiffD`
+
 ### Fixed
 
 - `Triangulation`: removed the fan-angle cutoff from 2.0.1-14, which could report success with regions left untriangulated; triangulation is 1.5-2x slower and now covers the input exactly ([#42](https://github.com/countertype/clipper2-ts/pull/42))
@@ -28,7 +30,22 @@ All changes to this project will be documented in this file
 - `Engine`: a closed path with only two distinct points is ignored, as in C++, including one given with its closing point repeated
 - `Engine`, `Offset`: `execute` into paths after `execute` into a `PolyTree` on the same clipper or `ClipperOffset` no longer runs in PolyTree mode
 - `Engine`: a `zCallback` no longer changes the caller's input points
-- `Core`: `path2ContainsPath1` follows C++ when a path only touches its parent, which fixes `PolyTree` nesting of touching paths
+- `Core`: when every vertex of a path is on its parent, `path2ContainsPath1` tests the midpoints of the path's edges, relative to the path's own corner, before the bounds midpoint. A hole touching its owner at every vertex is nested under it and a ring that only shares an edge is not. C++ nests neither and C# both
+- `Engine`: the `PolyTree` nesting test cleans an owner ring once, not once per touching hole; 10,000 holes touching a 60,000 point ring went from 10.1 s to 6.3 s
+- `Engine`: a clipper run from inside a `zCallback` no longer disturbs the clipper that called it, which with open paths did not return; the open paths flag is held on each clipper
+- `Engine`: `execute` returns `true` for `ClipType.NoClip`, and `ClipperD.execute` returns `false` after a failed sweep, both as in C++; nothing is built after a failed sweep
+- `Engine`: `getBounds` no longer throws after a path of one point was added
+- `Engine`: a horizontal's first output point keeps its z
+- `RectClip`: an edge along the top or bottom of the rectangle and through its right corner is crossed at that corner, as in C++
+- `Clipper`: a precision of 0 is no longer replaced by 2 in `unionD`, `rectClip` and `rectClipLines`
+- `Clipper`: `stripDuplicates` and `stripNearDuplicates` keep the one point of a closed path of repeats, and `stripNearDuplicates` drops every closing point near the first, as in C++
+- `Clipper`: `ramerDouglasPeuckerD` compares end points exactly, as in C++
+- `Minkowski`: `sumD` and `diffD` round half away from zero when scaling, as everywhere else and as in C++
+- `Triangulation`: a path that is entirely collinear, or whose edges keep returning to one vertex, no longer keeps `triangulate` from returning or runs it out of memory; spikes of no width are left out and the rest of the path is triangulated
+- `Triangulation`: an inconsistency met on self-touching rings is returned as `fail` instead of being thrown
+- `Offset`: path sizes are compared exactly above 2^53, so two paths of nearly equal area no longer give a result that depends on their order
+- `Offset`: square joins round as the other joins do, without throwing near the top of the safe integer range
+- `Offset`: the cap of an open path is skipped for a delta of exactly the tolerance, as in C++
 - `Core`, `Clipper`, `Offset`: coordinates are rounded half away from zero, as in C++, and are never `-0`; `midPoint` uses integer division; `ellipse` truncates its default steps, down to 3 at the least
 - `Offset`: a polygon group without a closed path no longer flips the sign of delta for later groups or decides the solution's orientation (PolyClipping/Clipper2 [6c7d0830](https://github.com/PolyClipping/Clipper2/commit/6c7d0830), [ca30bebd](https://github.com/PolyClipping/Clipper2/commit/ca30bebd), [#9](https://github.com/PolyClipping/Clipper2/issues/9))
 - `Offset`: `deltaCallback` gets the normals and arc steps of the single point path it is called for (PolyClipping/Clipper2 [6c7d0830](https://github.com/PolyClipping/Clipper2/commit/6c7d0830))
@@ -43,11 +60,17 @@ All changes to this project will be documented in this file
 - `Offset`: **output is wound positively whatever the orientation of the input** (PolyClipping/Clipper2 [64a9ecc](https://github.com/PolyClipping/Clipper2/commit/64a9ecc), [#13](https://github.com/PolyClipping/Clipper2/issues/13)). Clockwise input used to give clockwise output; set `reverseSolution` or reverse the result to get that back
 - `Engine`: **an exception thrown during `execute` now escapes it**, as in C++, instead of being caught and returned as `false`. The clipper is still cleaned up
 - `Offset`: outers and holes are decided by exact area and containment, so a stray reversed sliver no longer flips a group; a hole that no outer encloses contributes nothing
-- `Offset`: a delta below half a unit normalizes the winding of closed paths and returns open paths as given; a point or line in a `Polygon` group is removed by a negative delta
+- `Offset`: a delta below half a unit normalizes the winding of closed paths and returns open paths as given; a point or line in a `Polygon` group is removed by a negative delta. The closed paths go through a union, as in C++, so they are no longer returned as given: overlapping paths merge, collinear points go, and a delta of 0 is no longer a cheap pass-through
+- `Offset`: a coordinate that is not a finite number throws a `RangeError` for every join and end type; it used to throw for some and return an empty result for others
+- `Clipper`: **`rectClip` and `rectClipLines` take the decimal form only when a precision is given or the rect itself has a fraction**. They used to look only at the rect's left side, so a decimal rect starting on a whole number clipped decimal paths as integers. Decimal paths in a rect of whole numbers need `rectClipD` / `rectClipLinesD` or an explicit precision
+- `Clipper`: `ellipse`, `stripDuplicates` and the scaling of decimal paths live in `Core`, so importing `ellipse` alone no longer pulls in the offsetter and the engine
+- `Engine`, `Offset`: one threshold, `StripeIndex.defaultThreshold`, decides when a ring is indexed
+- Dev dependencies: `vitest` 4.1.12, `typescript-eslint` 8.72.1, `minimatch` overridden to 11; `npm audit` reports no vulnerabilities
+- Tests: the package loading tests rebuild `dist/` before each run
 - `Offset`: removed the unused static `ClipperOffset.getLowestPathInfo` and `ClipperOffset.area`; `Clipper.area` gives the same area
 - `Offset`: arc steps follow C++, so round joins with a delta under about 16 get fewer vertices; a single point is a circle only for a round join type; a closed path of identical points is offset as a point
 - Clipping output can differ from 2.0.1-19 by one unit at intersection points. Compared with PolyClipping/Clipper2 C++ on random inputs, results are now identical in 99.9% of clipping cases (was 23%) and in all offset cases compared; the rest are holes kept by [#35](https://github.com/countertype/clipper2-ts/pull/35)
-- Tests: `Polygons.txt` and its tolerance table are synced with upstream, and upstream's regression tests for the changes above are ported
+- Tests: `Polygons.txt` and its tolerance table are synced with upstream, and upstream's tests are ported from every file of its test suite that applies here
 
 ## [2.0.1-19]
 
@@ -60,10 +83,6 @@ All changes to this project will be documented in this file
 - `RectClip`: a path entering the rectangle through a vertex on its edge no longer drops the corner that follows; the location from the second intersection is now carried forward as in C# ([#37](https://github.com/countertype/clipper2-ts/issues/37))
 - `RectClip`: intersections with a rectangle side keep the coordinate on that side exact instead of landing one unit inside after rounding (upstream [#1114](https://github.com/AngusJohnson/Clipper2/pull/1114), [#1095](https://github.com/AngusJohnson/Clipper2/issues/1095))
 - Package loading: the ES module build is exported under the `default` condition, so `require('clipper2-ts')` works on Node.js 20.19+, 22.12+ and 23+ and in bundlers, including TypeScript CLI tools compiled to CommonJS ([#38](https://github.com/countertype/clipper2-ts/pull/38))
-
-### Changed
-
-- Dev dependencies: `vitest` 4.1.12, `typescript-eslint` 8.72.1, `minimatch` overridden to 11; `npm audit` reports no vulnerabilities
 
 ### Performance
 

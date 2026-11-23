@@ -65,3 +65,44 @@ test('an entirely collinear path is skipped', () => {
     expect(triangulate([Clipper.makePath(flat)]).result).toBe(TriangulateResult.noPolygons);
   }
 });
+
+// Paths whose edges keep returning to one vertex. The walk in addPath never closed on them:
+// the first did not return and the third ran out of memory. They are now walked once more
+// without their spikes, and whatever is left is triangulated.
+test('paths with spikes of no width are triangulated without them', () => {
+  // nothing but two spikes from one vertex
+  const kite = Clipper.makePath([0,10, -5,0, 0,10, 5,0]);
+  expect(triangulate([kite]).result).toBe(TriangulateResult.noPolygons);
+
+  const square = Clipper.makePath([0,0, 100,0, 100,100, 0,100]);
+  const beside = triangulate([square, Clipper.makePath([200,10, 195,0, 200,10, 205,0])]);
+  expect(beside.result).toBe(TriangulateResult.success);
+  expect(beside.solution.reduce((sum, tri) => sum + Math.abs(Clipper.area(tri)), 0)).toBe(10000);
+
+  // a 10 x 10 square whose only local minimum is the tip of a spike
+  const spiked = triangulate([Clipper.makePath([0,0, 10,0, 10,10, 5,10, 5,20, 5,10, 0,10])]);
+  expect(spiked.result).toBe(TriangulateResult.success);
+  expect(spiked.solution.reduce((sum, tri) => sum + Math.abs(Clipper.area(tri)), 0)).toBe(100);
+
+  // a union's output with a spike back to (2,5)
+  const ring = Clipper.makePath([1,4, 2,5, 2,4, 3,5, 3,4, 3,3, 3,2, 3,1, 3,0, 4,1, 6,3, 8,0, 7,2, 8,3, 8,5,
+    7,5, 7,4, 6,4, 5,5, 5,4, 3,6, 5,7, 4,8, 3,7, 2,8, 0,5, 2,5]);
+  const result = triangulate([ring, Clipper.makePath([7,8, 5,7, 5,5])]);
+  expect(result.result).toBe(TriangulateResult.success);
+  expect(result.solution.length).toBeGreaterThan(0);
+});
+
+// An inconsistency met part way through used to escape as an Error.
+test('rings that touch themselves give a result and do not throw', () => {
+  const rings = [
+    [8,8, 3,7, 6,7],
+    [4,5, 5,6, 6,7, 4,6],
+    [7,7, 4,6, 6,5, 4,1, 5,5, 4,5, 2,3, 2,4, 2,6, 1,7, 2,4, 1,4, 5,0],
+    [4,6, 4,7, 2,6, 3,6],
+  ].map(coords => Clipper.makePath(coords));
+  for (const preserveCollinear of [false, true]) {
+    const { result, solution } = triangulate(rings, true, preserveCollinear);
+    expect(result).toBe(TriangulateResult.fail);
+    expect(solution).toEqual([]);
+  }
+});

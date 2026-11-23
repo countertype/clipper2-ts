@@ -6,12 +6,20 @@ import { Clipper, FillRule, InternalClipper, Minkowski, type Path64, type PathD,
 const xy = (paths: { x: number, y: number }[][]): number[][][] => paths.map(p => p.map(q => [q.x, q.y]));
 
 describe('rectClip', () => {
-  test('a rect of whole numbers still clips decimal paths at their precision', () => {
-    // the rect was taken for a Rect64 when its left was whole, and the paths were left unscaled
+  test('rectClipD clips decimal paths at their precision, whatever the rect holds', () => {
+    // rectClip takes a rect of whole numbers for a Rect64, so decimal paths need rectClipD
+    // or an explicit precision
     const paths: PathsD = [[{ x: -5.123, y: 2.345 }, { x: 5.678, y: 2.345 }, { x: 5.678, y: 7.891 }, { x: -5.123, y: 7.891 }]];
     const expected = [[0, 7.89], [0, 2.35], [5.68, 2.35], [5.68, 7.89]];
-    for (const rect of [{ left: 0, top: 0, right: 10, bottom: 10 }, { left: 0, top: 0, right: 10.5, bottom: 10.5 }]) {
-      const solution = Clipper.rectClip(rect, paths);
+    const whole = { left: 0, top: 0, right: 10, bottom: 10 };
+    const fractional = { left: 0, top: 0, right: 10.5, bottom: 10.5 };
+    const solutions = [
+      Clipper.rectClipD(whole, paths),
+      Clipper.rectClipD(whole, paths[0]),
+      Clipper.rectClip(whole, paths, 2),
+      Clipper.rectClip(fractional, paths),
+    ];
+    for (const solution of solutions) {
       expect(solution).toHaveLength(1);
       expect(solution[0]).toHaveLength(4);
       solution[0].forEach((pt, i) => {
@@ -19,9 +27,21 @@ describe('rectClip', () => {
         expect(pt.y).toBeCloseTo(expected[i][1], 9);
       });
     }
-    const lines = Clipper.rectClipLines({ left: 0, top: 0, right: 10, bottom: 10 }, [[{ x: -5.5, y: 5.25 }, { x: 5.678, y: 7.891 }]]);
+    const lines = Clipper.rectClipLinesD(whole, [[{ x: -5.5, y: 5.25 }, { x: 5.678, y: 7.891 }]]);
     expect(lines).toHaveLength(1);
     expect(lines[0][1].x).toBeCloseTo(5.68, 9);
+  });
+
+  test('rectClip does not choose its form from the paths', () => {
+    // the crossing of the same edge was (10,7) or (10,6.67) depending on a fraction elsewhere
+    const rect = { left: 0, top: 0, right: 10, bottom: 10 };
+    const crossing = (far: number): number[] => {
+      const solution = Clipper.rectClip(rect, [[{ x: 5, y: 5 }, { x: 20, y: 10 }, { x: 5, y: far }]]);
+      const pt = solution[0].find(q => q.x === 10 && q.y < 10)!;
+      return [pt.x, pt.y];
+    };
+    expect(crossing(11)).toEqual([10, 7]);
+    expect(crossing(11.5)).toEqual([10, 7]);
   });
 
   test('whole paths in a whole rect are clipped as integers', () => {

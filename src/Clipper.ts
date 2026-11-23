@@ -13,7 +13,8 @@ import {
   Point64, PointD, Path64, PathD, Paths64, PathsD, Rect64, RectD,
   ClipType, PathType, FillRule, PointInPolygonResult,
   InternalClipper, Point64Utils, PointDUtils, Rect64Utils, RectDUtils,
-  InvalidRect64, InvalidRectD
+  InvalidRect64, InvalidRectD,
+  stripDuplicates64, ellipse64, scalePathDTo64
 } from './Core.js';
 import { Clipper64, ClipperD, PolyTree64, PolyTreeD, PolyPathD } from './Engine.js';
 import { ClipperOffset, JoinType, EndType } from './Offset.js';
@@ -148,26 +149,14 @@ export function inflatePathsD(paths: PathsD, delta: number, joinType: JoinType, 
   return scalePathsD(solution, 1 / scale);
 }
 
-// Rect64 and RectD are the same shape here, so the integer form is taken only when no
-// precision is given and every coordinate of the rect and of the paths is whole. C++
-// chooses by type.
-function isIntegerRectClip(
-  rect: Rect64 | RectD, pathsOrPath: Paths64 | Path64 | PathsD | PathD, precision?: number
-): boolean {
-  if (precision !== undefined) return false;
-  if (!Number.isInteger(rect.left) || !Number.isInteger(rect.top) ||
-    !Number.isInteger(rect.right) || !Number.isInteger(rect.bottom)) return false;
-  const isWhole = (path: Path64 | PathD): boolean => {
-    for (const pt of path) {
-      if (!Number.isInteger(pt.x) || !Number.isInteger(pt.y)) return false;
-    }
-    return true;
-  };
-  if (!Array.isArray(pathsOrPath[0])) return isWhole(pathsOrPath as Path64 | PathD);
-  for (const path of pathsOrPath as Paths64 | PathsD) {
-    if (!isWhole(path)) return false;
-  }
-  return true;
+// Rect64 and RectD are the same shape here, where C++ chooses by type. rectClip and
+// rectClipLines take the integer form unless a precision is given or the rect itself has
+// a fraction, and never look at the paths to decide. rectClipD and rectClipLinesD always
+// take the decimal form, whatever the values.
+function isDecimalRectCall(rect: Rect64 | RectD, precision?: number): boolean {
+  return precision !== undefined ||
+    !Number.isInteger(rect.left) || !Number.isInteger(rect.top) ||
+    !Number.isInteger(rect.right) || !Number.isInteger(rect.bottom);
 }
 
 export function rectClip(rect: Rect64, paths: Paths64): Paths64;
@@ -175,50 +164,25 @@ export function rectClip(rect: Rect64, path: Path64): Paths64;
 export function rectClip(rect: RectD, paths: PathsD, precision?: number): PathsD;
 export function rectClip(rect: RectD, path: PathD, precision?: number): PathsD;
 export function rectClip(rect: Rect64 | RectD, pathsOrPath: Paths64 | Path64 | PathsD | PathD, precision?: number): Paths64 | PathsD {
-  if (isIntegerRectClip(rect, pathsOrPath, precision)) {
-    // Rect64 case
-    const rect64 = rect as Rect64;
-    if (Rect64Utils.isEmpty(rect64)) return [];
-    
-    if (Array.isArray(pathsOrPath[0])) {
-      // Paths64
-      const paths = pathsOrPath as Paths64;
-      if (paths.length === 0) return [];
-      const rc = new RectClip64(rect64);
-      return rc.execute(paths);
-    } else {
-      // Path64
-      const path = pathsOrPath as Path64;
-      if (path.length === 0) return [];
-      const tmp: Paths64 = [path];
-      return rectClip(rect64, tmp);
-    }
-  } else {
-    // RectD case
-    const rectD = rect as RectD;
-    const prec = precision ?? 2;
-    InternalClipper.checkPrecision(prec);
-    if (RectDUtils.isEmpty(rectD)) return [];
-    
-    const scale = Math.pow(10, prec);
-    const r = scaleRect(rectD, scale);
-    
-    if (Array.isArray(pathsOrPath[0])) {
-      // PathsD
-      const paths = pathsOrPath as PathsD;
-      if (paths.length === 0) return [];
-      const tmpPath = scalePaths64(paths, scale);
-      const rc = new RectClip64(r);
-      const result = rc.execute(tmpPath);
-      return scalePathsD(result, 1 / scale);
-    } else {
-      // PathD
-      const path = pathsOrPath as PathD;
-      if (path.length === 0) return [];
-      const tmp: PathsD = [path];
-      return rectClip(rectD, tmp, prec);
-    }
+  if (isDecimalRectCall(rect, precision)) {
+    return rectClipD(rect, pathsOrPath as PathsD, precision);
   }
+  if (Rect64Utils.isEmpty(rect)) return [];
+  if (pathsOrPath.length === 0) return [];
+  const paths = Array.isArray(pathsOrPath[0]) ? pathsOrPath as Paths64 : [pathsOrPath as Path64];
+  return new RectClip64(rect).execute(paths);
+}
+
+export function rectClipD(rect: RectD, paths: PathsD, precision?: number): PathsD;
+export function rectClipD(rect: RectD, path: PathD, precision?: number): PathsD;
+export function rectClipD(rect: RectD, pathsOrPath: PathsD | PathD, precision: number = 2): PathsD {
+  InternalClipper.checkPrecision(precision);
+  if (RectDUtils.isEmpty(rect)) return [];
+  if (pathsOrPath.length === 0) return [];
+  const paths = Array.isArray(pathsOrPath[0]) ? pathsOrPath as PathsD : [pathsOrPath as PathD];
+  const scale = Math.pow(10, precision);
+  const rc = new RectClip64(scaleRect(rect, scale));
+  return scalePathsD(rc.execute(scalePaths64(paths, scale)), 1 / scale);
 }
 
 export function rectClipLines(rect: Rect64, paths: Paths64): Paths64;
@@ -226,50 +190,25 @@ export function rectClipLines(rect: Rect64, path: Path64): Paths64;
 export function rectClipLines(rect: RectD, paths: PathsD, precision?: number): PathsD;
 export function rectClipLines(rect: RectD, path: PathD, precision?: number): PathsD;
 export function rectClipLines(rect: Rect64 | RectD, pathsOrPath: Paths64 | Path64 | PathsD | PathD, precision?: number): Paths64 | PathsD {
-  if (isIntegerRectClip(rect, pathsOrPath, precision)) {
-    // Rect64 case
-    const rect64 = rect as Rect64;
-    if (Rect64Utils.isEmpty(rect64)) return [];
-    
-    if (Array.isArray(pathsOrPath[0])) {
-      // Paths64
-      const paths = pathsOrPath as Paths64;
-      if (paths.length === 0) return [];
-      const rc = new RectClipLines64(rect64);
-      return rc.execute(paths);
-    } else {
-      // Path64
-      const path = pathsOrPath as Path64;
-      if (path.length === 0) return [];
-      const tmp: Paths64 = [path];
-      return rectClipLines(rect64, tmp);
-    }
-  } else {
-    // RectD case
-    const rectD = rect as RectD;
-    const prec = precision ?? 2;
-    InternalClipper.checkPrecision(prec);
-    if (RectDUtils.isEmpty(rectD)) return [];
-    
-    const scale = Math.pow(10, prec);
-    const r = scaleRect(rectD, scale);
-    
-    if (Array.isArray(pathsOrPath[0])) {
-      // PathsD
-      const paths = pathsOrPath as PathsD;
-      if (paths.length === 0) return [];
-      const tmpPath = scalePaths64(paths, scale);
-      const rc = new RectClipLines64(r);
-      const result = rc.execute(tmpPath);
-      return scalePathsD(result, 1 / scale);
-    } else {
-      // PathD
-      const path = pathsOrPath as PathD;
-      if (path.length === 0) return [];
-      const tmp: PathsD = [path];
-      return rectClipLines(rectD, tmp, prec);
-    }
+  if (isDecimalRectCall(rect, precision)) {
+    return rectClipLinesD(rect, pathsOrPath as PathsD, precision);
   }
+  if (Rect64Utils.isEmpty(rect)) return [];
+  if (pathsOrPath.length === 0) return [];
+  const paths = Array.isArray(pathsOrPath[0]) ? pathsOrPath as Paths64 : [pathsOrPath as Path64];
+  return new RectClipLines64(rect).execute(paths);
+}
+
+export function rectClipLinesD(rect: RectD, paths: PathsD, precision?: number): PathsD;
+export function rectClipLinesD(rect: RectD, path: PathD, precision?: number): PathsD;
+export function rectClipLinesD(rect: RectD, pathsOrPath: PathsD | PathD, precision: number = 2): PathsD {
+  InternalClipper.checkPrecision(precision);
+  if (RectDUtils.isEmpty(rect)) return [];
+  if (pathsOrPath.length === 0) return [];
+  const paths = Array.isArray(pathsOrPath[0]) ? pathsOrPath as PathsD : [pathsOrPath as PathD];
+  const scale = Math.pow(10, precision);
+  const rc = new RectClipLines64(scaleRect(rect, scale));
+  return scalePathsD(rc.execute(scalePaths64(paths, scale)), 1 / scale);
 }
 
 export function minkowskiSum(pattern: Path64, path: Path64, isClosed: boolean): Paths64 {
@@ -437,17 +376,7 @@ export function scalePathsD(paths: PathsD, scale: number): PathsD {
 
 // Unlike ScalePath, both ScalePath64 & ScalePathD also involve type conversion
 export function scalePath64(path: PathD, scale: number): Path64 {
-  const maxAbs = InternalClipper.maxSafeCoordinateForScale(scale);
-  const result: Path64 = [];
-  for (const pt of path) {
-    InternalClipper.checkSafeScaleValue(pt.x, maxAbs, "scalePath64");
-    InternalClipper.checkSafeScaleValue(pt.y, maxAbs, "scalePath64");
-    result.push({
-      x: InternalClipper.roundAwayFromZero(pt.x * scale),
-      y: InternalClipper.roundAwayFromZero(pt.y * scale)
-    });
-  }
-  return result;
+  return scalePathDTo64(path, scale);
 }
 
 export function scalePaths64(paths: PathsD, scale: number): Paths64 {
@@ -661,7 +590,8 @@ export function midPoint(pt1: Point64, pt2: Point64): Point64 {
     };
   }
   // integer division, as in C++ (and as the BigInt branch above does)
-  return { x: Math.trunc((pt1.x + pt2.x) / 2), y: Math.trunc((pt1.y + pt2.y) / 2) };
+  // (adding 0 turns the -0 that truncating gives between -1 and 0 into 0)
+  return { x: Math.trunc((pt1.x + pt2.x) / 2) + 0, y: Math.trunc((pt1.y + pt2.y) / 2) + 0 };
 }
 
 export function midPointD(pt1: PointD, pt2: PointD): PointD {
@@ -710,7 +640,7 @@ export function stripNearDuplicates(path: PathD, minEdgeLenSqrd: number, isClose
 }
 
 export function stripDuplicates(path: Path64, isClosedPath: boolean): Path64 {
-  return ClipperOffset.stripDuplicates(path, isClosedPath);
+  return stripDuplicates64(path, isClosedPath);
 }
 
 function addPolyNodeToPaths(polyPath: PolyTree64, paths: Paths64): void {
@@ -1109,7 +1039,7 @@ export function pointInPolygonD(pt: PointD, polygon: PathD, precision: number = 
 }
 
 export function ellipse(center: Point64, radiusX: number, radiusY: number = 0, steps: number = 0): Path64 {
-  return ClipperOffset.ellipse(center, radiusX, radiusY, steps);
+  return ellipse64(center, radiusX, radiusY, steps);
 }
 
 export function ellipseD(center: PointD, radiusX: number, radiusY: number = 0, steps: number = 0): PathD {
@@ -1194,7 +1124,9 @@ export const Clipper = {
   inflatePaths,
   inflatePathsD,
   rectClip,
+  rectClipD,
   rectClipLines,
+  rectClipLinesD,
   minkowskiSum,
   minkowskiSumD,
   minkowskiDiff,

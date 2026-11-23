@@ -534,3 +534,20 @@ describe('sweep details that differed from upstream', () => {
     expect(Clipper.stripDuplicates(mk([[[3,3],[4,4],[3,3]]])[0], true)).toEqual([{ x: 3, y: 3 }, { x: 4, y: 4 }]);
   });
 });
+
+describe('degenerate input to the clipper', () => {
+  test('getBounds skips a path of one point, or of one point repeated', () => {
+    const c = new Clipper64();
+    c.addSubject([[{ x: 1, y: 1 }], [{ x: 7, y: 7 }, { x: 7, y: 7 }, { x: 7, y: 7 }]]);
+    expect(c.getBounds()).toEqual({ left: 0, top: 0, right: 0, bottom: 0 });
+    c.addSubject([Clipper.makePath([2,3, 12,3, 12,9])]);
+    expect(c.getBounds()).toEqual({ left: 2, top: 3, right: 12, bottom: 9 });
+  });
+
+  test('midpoints are never negative zero', () => {
+    const isNegativeZero = (v: number): boolean => Object.is(v, -0);
+    const pt = Clipper.midPoint({ x: -1, y: -1 }, { x: 0, y: 0 });
+    expect(isNegativeZero(pt.x) || isNegativeZero(pt.y)).toBe(false);
+    expect(pt).toEqual({ x: 0, y: 0 });
+  });
+});

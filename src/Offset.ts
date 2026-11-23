@@ -10,7 +10,7 @@
 import {
   Point64, PointD, Path64, PathD, Paths64, Rect64,
   ClipType, FillRule, PointInPolygonResult,
-  Point64Utils, PointDUtils, InternalClipper
+  Point64Utils, PointDUtils, InternalClipper, stripDuplicates64, ellipse64
 } from './Core.js';
 import { Clipper64, PolyTree64, StripeIndex } from './Engine.js';
 
@@ -302,7 +302,7 @@ class PolygonLocator {
   }
 
   public locate(pt: Point64, polygon: Path64, polygonIdx: number): PointInPolygonResult {
-    if (polygon.length < 64) return InternalClipper.pointInPolygon(pt, polygon);
+    if (polygon.length <= StripeIndex.defaultThreshold) return InternalClipper.pointInPolygon(pt, polygon);
 
     let index = this.indexes[polygonIdx];
     if (index === undefined) {
@@ -333,6 +333,13 @@ class Group {
     this.inPaths = [];
     for (const path of paths) {
       const stripped = ClipperOffset.stripDuplicates(path, isJoined);
+      // TS: a coordinate that is not a finite number has no offset, and is refused here
+      // so that every join and end type refuses it alike
+      for (const pt of stripped) {
+        if (!Number.isFinite(pt.x) || !Number.isFinite(pt.y)) {
+          throw new RangeError("ClipperOffset: path coordinates must be finite numbers");
+        }
+      }
       // the offset code assumes every path has at least one vertex
       if (stripped.length > 0) this.inPaths.push(stripped);
     }
@@ -785,11 +792,7 @@ export class ClipperOffset {
   // (rounded as the other joins round, without the range check of Point64Utils.fromPointD,
   // so a square join doesn't throw where the others carry on, and as in C++)
   private static roundPoint(pt: PointD): Point64 {
-    return {
-      x: InternalClipper.roundAwayFromZero(pt.x),
-      y: InternalClipper.roundAwayFromZero(pt.y),
-      z: pt.z || 0
-    };
+    return Point64Utils.create(pt.x, pt.y, pt.z || 0);
   }
 
   private doSquare(path: Path64, j: number, k: number): void {
@@ -1142,23 +1145,7 @@ export class ClipperOffset {
   }
 
   public static stripDuplicates(path: Path64, isClosedPath: boolean): Path64 {
-    const cnt = path.length;
-    const result: Path64 = [];
-    if (cnt === 0) return result;
-    
-    let lastPt = path[0];
-    result.push(lastPt);
-    for (let i = 1; i < cnt; i++) {
-      if (!Point64Utils.equals(lastPt, path[i])) {
-        lastPt = path[i];
-        result.push(lastPt);
-      }
-    }
-    // (every closing point equal to the first is dropped, and a single point is kept, as in C++)
-    while (isClosedPath && result.length > 1 && Point64Utils.equals(result[result.length - 1], result[0])) {
-      result.pop();
-    }
-    return result;
+    return stripDuplicates64(path, isClosedPath);
   }
 
   public static sqr(val: number): number {
@@ -1166,28 +1153,6 @@ export class ClipperOffset {
   }
 
   public static ellipse(center: Point64, radiusX: number, radiusY: number = 0, steps: number = 0): Path64 {
-    if (radiusX <= 0) return [];
-    if (radiusY <= 0) radiusY = radiusX;
-    if (steps <= 2) {
-      steps = Math.trunc(Math.PI * Math.sqrt((radiusX + radiusY) / 2)); // truncated, as in C++
-      if (steps < 3) steps = 3; // TS: C++ has no minimum
-    }
-
-    const si = Math.sin(2 * Math.PI / steps);
-    const co = Math.cos(2 * Math.PI / steps);
-    let dx = co;
-    let dy = si;
-    const result: Path64 = [{ x: InternalClipper.roundAwayFromZero(center.x + radiusX), y: center.y }];
-    
-    for (let i = 1; i < steps; ++i) {
-      result.push({
-        x: InternalClipper.roundAwayFromZero(center.x + radiusX * dx),
-        y: InternalClipper.roundAwayFromZero(center.y + radiusY * dy)
-      });
-      const x = dx * co - dy * si;
-      dy = dy * co + dx * si;
-      dx = x;
-    }
-    return result;
+    return ellipse64(center, radiusX, radiusY, steps);
   }
 }

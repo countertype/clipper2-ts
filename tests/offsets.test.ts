@@ -437,4 +437,14 @@ describe('Polygon Offset Tests', () => {
       expect(Clipper.inflatePaths(square, 10, joinType, EndType.Polygon)).toHaveLength(1);
     }
   });
+  test('a coordinate that is not a finite number is refused, whatever the join or end type', () => {
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      for (const joinType of [JoinType.Miter, JoinType.Square, JoinType.Round, JoinType.Bevel]) {
+        for (const endType of [EndType.Polygon, EndType.Joined, EndType.Butt]) {
+          const paths: Paths64 = [[{ x: bad, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 0, y: 10 }]];
+          expect(() => Clipper.inflatePaths(paths, 2, joinType, endType)).toThrow(RangeError);
+        }
+      }
+    }
+  });
 });

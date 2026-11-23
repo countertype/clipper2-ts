@@ -36,6 +36,9 @@ function warnDeprecated(): void {
 }
 
 /** @deprecated Triangulation will be removed in the next release. See https://github.com/countertype/clipper2-ts/issues/41 */
+// raised inside the triangulation when its edges and vertices stop agreeing; execute turns it into fail
+class TriangulationError extends Error {}
+
 export enum TriangulateResult {
   success,
   fail,
@@ -154,16 +157,45 @@ export class Delaunay {
     this.fastMath = Math.max(maxDeltaX, maxDeltaY) <= Delaunay.maxSafeDelta;
   }
 
+  // TS: a path that tryAddPath can't walk, because a spike of no width hides its only local
+  // minimum or its edges keep returning to one vertex, is tried once more without its spikes.
+  // C++ drops the first kind and does not return from the second.
   private addPath(path: Path64): void {
+    if (this.tryAddPath(path)) return;
+    const cleaned = this.withoutSpikes(path);
+    if (cleaned.length >= 3 && cleaned.length < path.length) this.tryAddPath(cleaned);
+  }
+
+  // the path with repeated points and every vertex on the line of its neighbours taken out,
+  // until none is left
+  private withoutSpikes(path: Path64): Path64 {
+    const pts = path.slice();
+    let changed = true;
+    while (changed && pts.length >= 3) {
+      changed = false;
+      for (let i = 0; i < pts.length && pts.length >= 3; i++) {
+        const prev = pts[(i + pts.length - 1) % pts.length];
+        const next = pts[(i + 1) % pts.length];
+        if (this.crossProductSign(prev, pts[i], next) === 0) {
+          pts.splice(i--, 1);
+          changed = true;
+        }
+      }
+    }
+    return pts;
+  }
+
+  // false when the path could not be walked, with nothing of it left behind
+  private tryAddPath(path: Path64): boolean {
     const len = path.length;
-    if (len === 0) return;
+    if (len === 0) return true;
 
     let i0 = 0;
     let iPrev: number;
     let iNext: number;
 
     i0 = Delaunay.findLocMinIdx(path, len, i0);
-    if (i0 < 0) return;
+    if (i0 < 0) return true;
 
     iPrev = Delaunay.prev(i0, len);
     while (path[iPrev].x === path[i0].x && path[iPrev].y === path[i0].y)
@@ -174,7 +206,8 @@ export class Delaunay {
     let i = i0;
     while (this.crossProductSign(path[iPrev], path[i], path[iNext]) === 0) {
       i = Delaunay.findLocMinIdx(path, len, i);
-      if (i < 0 || i === i0) return; // an entirely collinear path
+      if (i < 0) return true;
+      if (i === i0) return false; // entirely collinear, or its only local minimum is a spike
       iPrev = Delaunay.prev(i, len);
       while (path[iPrev].x === path[i].x && path[iPrev].y === path[i].y)
         iPrev = Delaunay.prev(iPrev, len);
@@ -182,6 +215,20 @@ export class Delaunay {
     }
 
     const vert_cnt = this.allVertices.length;
+    const edge_cnt = this.allEdges.length;
+    const locMin_cnt = this.locMinStack.length;
+    const lowermost = this.lowermostVertex;
+    // every step below moves on one vertex, and a walk that has gone round the path twice
+    // without closing never will
+    let steps = 0;
+    const maxSteps = 2 * len + 2;
+    const giveUp = (): boolean => {
+      this.allVertices.length = vert_cnt;
+      this.allEdges.length = edge_cnt;
+      this.locMinStack.length = locMin_cnt;
+      this.lowermostVertex = lowermost;
+      return false;
+    };
     const v0 = new Vertex2(path[i]);
     this.allVertices.push(v0);
 
@@ -194,6 +241,7 @@ export class Delaunay {
     for (; ;) {
       iNext = Delaunay.next(i, len);
       if (this.crossProductSign(vPrev.pt, path[i], path[iNext]) === 0) {
+        if (++steps > maxSteps) return giveUp();
         i = iNext;
         continue;
       }
@@ -212,10 +260,12 @@ export class Delaunay {
         this.allVertices.push(v);
         this.createEdge(vPrev, v, EdgeKind.ascend);
         vPrev = v;
+        if (++steps > maxSteps) return giveUp();
         i = iNext;
         iNext = Delaunay.next(i, len);
 
         while (this.crossProductSign(vPrev.pt, path[i], path[iNext]) === 0) {
+          if (++steps > maxSteps) return giveUp();
           i = iNext;
           iNext = Delaunay.next(i, len);
         }
@@ -229,10 +279,12 @@ export class Delaunay {
         this.createEdge(v, vPrev, EdgeKind.descend);
         vPrevPrev = vPrev;
         vPrev = v;
+        if (++steps > maxSteps) return giveUp();
         i = iNext;
         iNext = Delaunay.next(i, len);
 
         while (this.crossProductSign(vPrev.pt, path[i], path[iNext]) === 0) {
+          if (++steps > maxSteps) return giveUp();
           i = iNext;
           iNext = Delaunay.next(i, len);
         }
@@ -256,6 +308,7 @@ export class Delaunay {
       for (let j = vert_cnt; j < this.allVertices.length; ++j)
         this.allVertices[j].edges = []; // flag to ignore
     }
+    return true;
   }
 
   private addPaths(paths: Paths64): boolean {
@@ -635,7 +688,7 @@ export class Delaunay {
       else if (eAi.triB === edge.triB)
         eAi.triB = edge.triA;
       else
-        throw new Error('Triangulation internal error');
+        throw new TriangulationError('Triangulation internal error');
     }
 
     edge.triB!.edges[0] = edge;
@@ -652,7 +705,7 @@ export class Delaunay {
       else if (eBi.triB === edge.triA)
         eBi.triB = edge.triB;
       else
-        throw new Error('Triangulation internal error');
+        throw new TriangulationError('Triangulation internal error');
     }
   }
 
@@ -866,7 +919,19 @@ export class Delaunay {
     if (this.firstActive === edge) this.firstActive = next;
   }
 
+  // TS: an inconsistency met part way, on paths that touch or cross themselves, is returned
+  // as fail. C++ raises its error from there.
   execute(paths: Paths64): { result: TriangulateResult, solution: Paths64 } {
+    try {
+      return this.executeInternal(paths);
+    } catch (e) {
+      if (!(e instanceof TriangulationError)) throw e;
+      this.cleanUp();
+      return { result: TriangulateResult.fail, solution: [] };
+    }
+  }
+
+  private executeInternal(paths: Paths64): { result: TriangulateResult, solution: Paths64 } {
     const sol: Paths64 = [];
 
     this.updateFastMath(paths);
@@ -1131,7 +1196,7 @@ export class Delaunay {
 
   private static removeEdgeFromVertex(vert: Vertex2, edge: Edge): void {
     const idx = vert.edges.indexOf(edge);
-    if (idx < 0) throw new Error('Edge not found in vertex');
+    if (idx < 0) throw new TriangulationError('Edge not found in vertex');
     // Swap-with-last-and-pop: O(1) instead of O(n) splice.
     // Edge order in the array doesn't matter.
     const last = vert.edges.length - 1;

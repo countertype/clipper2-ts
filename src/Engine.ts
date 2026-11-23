@@ -11,7 +11,7 @@ import {
     Point64, Path64, PathD, Paths64, PathsD, Rect64,
     ClipType, PathType, FillRule, PointInPolygonResult,
     ZCallback64, ZCallbackD,
-    InternalClipper, Rect64Utils
+    InternalClipper, Rect64Utils, scalePathDTo64
   } from './Core.js';
 
 // BigInt constants — avoid BigInt literal syntax (0n, 4n, etc.) to sidestep
@@ -166,6 +166,10 @@ export enum HorzPosition { Bottom, Middle, Top }
 // Buckets a ring's edges into horizontal Y stripes so a PIP query only scans the
 // stripe spanning pt.y (~O(sqrt n) vs O(n)). After KiCad's POLY_YSTRIPES_INDEX.
 export class StripeIndex {
+  // a ring with more vertices than this is worth indexing. The one figure serves PolyTree
+  // nesting (as the default of pipIndexThreshold) and the offsetter.
+  public static readonly defaultThreshold = 64;
+
   private edgeA: Point64[] = [];
   private edgeB: Point64[] = [];
   private stripes: number[][] = [];
@@ -440,7 +444,6 @@ export const ClipperEngine = {
         const pt = path[j];
         if (v0 === null) {
           v0 = new Vertex(pt, VertexFlags.None, null);
-          vertexList.push(v0);
           prevV = v0;
           prevPt = pt;
         } else if (!(prevPt!.x === pt.x && prevPt!.y === pt.y)) { // ie skips duplicates
@@ -455,6 +458,8 @@ export const ClipperEngine = {
       if (!isOpen && prevV!.pt.x === v0!.pt.x && prevV!.pt.y === v0!.pt.y) prevV = prevV!.prev;
       prevV!.next = v0;
       v0!.prev = prevV;
+      // (listed only once it is a ring, so getBounds can walk every listed vertex)
+      vertexList.push(v0!);
       // a closed path needs 3 vertices
       // TS: tested after the closing duplicate is dropped, so [A, B, A] is skipped too
       if (!isOpen && v0!.next === v0!.prev) continue;
@@ -690,9 +695,6 @@ export class PolyTreeD extends PolyPathD {
 }
 
 export class ClipperBase {
-  // When there are no open paths, a lot of open-path branching becomes dead code.
-  // We set this per execute to allow fast short-circuiting in hot helpers.
-  private static openPathsEnabled: boolean = true;
 
   protected cliptype: ClipType = ClipType.NoClip;
   protected fillrule: FillRule = FillRule.EvenOdd;
@@ -726,6 +728,8 @@ export class ClipperBase {
   // finds no inversions, i.e. no intersections; consumed by doTopOfScanbeam).
   private curXValidAtTop: boolean = false;
   protected isSortedMinimaList: boolean = false;
+  // When there are no open paths, a lot of open-path branching becomes dead code,
+  // and the sweep short-circuits on this. Held on each clipper, as in C++.
   protected hasOpenPaths: boolean = false;
   protected usingPolytree: boolean = false;
   protected succeeded: boolean = false;
@@ -739,7 +743,7 @@ export class ClipperBase {
   // Ring edge count below which a StripeIndex does not pay off when nesting a PolyTree;
   // brute force instead. 64 is upstream's empirical break-even. Also a testing knob:
   // high forces brute-force nesting, low forces stripe indexing.
-  public pipIndexThreshold: number = 64;
+  public pipIndexThreshold: number = StripeIndex.defaultThreshold;
 
   constructor() {}
 
@@ -791,9 +795,6 @@ export class ClipperBase {
       }
       zCallback(ae2.bot, ae2.top, ae1.bot, ae1.top, intersectPt);
     }
-    // TS: openPathsEnabled is shared by every clipper, where C++ keeps has_open_paths_
-    // on each. A callback that runs another clipper leaves that one's value behind.
-    ClipperBase.openPathsEnabled = this.hasOpenPaths;
   }
 
   // Helper functions
@@ -806,12 +807,11 @@ private static isHotEdge(ae: Active): boolean {
 }
 
   private static isOpen(ae: Active): boolean {
-    return ClipperBase.openPathsEnabled && ae.localMin!.isOpen;
+    return ae.localMin!.isOpen;
   }
 
   private static isOpenEnd(ae: Active): boolean {
-    return ClipperBase.openPathsEnabled &&
-      ae.localMin!.isOpen &&
+    return ae.localMin!.isOpen &&
       ClipperBase.isOpenEndVertex(ae.vertexTop!);
   }
 
@@ -821,13 +821,6 @@ private static isHotEdge(ae: Active): boolean {
 
   private static getPrevHotEdge(ae: Active): Active | null {
     let prev = ae.prevInAEL;
-    // Fast path: when open paths are disabled, avoid calling isOpen() in the loop.
-    if (!ClipperBase.openPathsEnabled) {
-      while (prev !== null && !ClipperBase.isHotEdge(prev)) {
-        prev = prev.prevInAEL;
-      }
-      return prev;
-    }
     while (prev !== null && (prev.localMin!.isOpen || !ClipperBase.isHotEdge(prev))) {
       prev = prev.prevInAEL;
     }
@@ -1114,7 +1107,6 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     this.succeeded = true; // (C++ resets first, so NoClip succeeds)
     return;
   }
-  ClipperBase.openPathsEnabled = this.hasOpenPaths;
   this.zCallbackInternal = this.getZCallback();
   this.fillrule = fillRule;
   this.cliptype = ct;
@@ -1209,7 +1201,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       leftBound!.isLeftBound = true;
       this.insertLeftEdge(leftBound!);
 
-      if (!ClipperBase.openPathsEnabled) {
+      if (!this.hasOpenPaths) {
         // Closed-path-only fast path.
         this.setWindCountForClosedPathEdge(leftBound!);
         contributing = this.isContributingClosed(leftBound!);
@@ -1245,7 +1237,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
           this.checkJoinRight(rightBound, rightBound.bot);
           this.insertScanline(rightBound.top.y);
         }
-      } else if (contributing && ClipperBase.openPathsEnabled) {
+      } else if (contributing && this.hasOpenPaths) {
         this.startOpenPath(leftBound!, leftBound!.bot);
       }
 
@@ -1270,7 +1262,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
   }
 
   private doHorizontal(horz: Active): void {
-    if (!ClipperBase.openPathsEnabled) {
+    if (!this.hasOpenPaths) {
       this.doHorizontalClosed(horz);
       return;
     }
@@ -2049,7 +2041,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     if (this.isJoined(ae)) this.split(ae, ae.bot);
 
     if (ClipperBase.isHorizontal(ae)) {
-      if (!ClipperBase.openPathsEnabled) {
+      if (!this.hasOpenPaths) {
         // Closed-path-only fast path.
         this.trimHorz(ae, this.preserveCollinear);
       } else if (!ClipperBase.isOpen(ae)) {
@@ -2290,7 +2282,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     const pt = ClipperBase.getPolyType(ae);
 
     // Closed-path-only fast path (no open edges in the AEL)
-    if (!ClipperBase.openPathsEnabled) {
+    if (!this.hasOpenPaths) {
       while (ae2 !== null && ClipperBase.getPolyType(ae2) !== pt) ae2 = ae2.prevInAEL;
 
       if (ae2 === null) {
@@ -3344,8 +3336,6 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
   if (this.zCallbackInternal) {
     (this.zCallbackInternal as ZCallback64)(
       prevOp.pt, splitOp.pt, splitOp.next!.pt, nextNextOp.pt, ip);
-    // the callback may have run another clipper (see setZ)
-    ClipperBase.openPathsEnabled = this.hasOpenPaths;
   }
 
   const doubleArea1 = ClipperBase.areaOutPt(prevOp);
@@ -3813,17 +3803,7 @@ export const Clipper = {
   },
 
   scalePath64(path: PathD, scale: number): Path64 {
-    const maxAbs = InternalClipper.maxSafeCoordinateForScale(scale);
-    const result: Path64 = [];
-    for (const pt of path) {
-      InternalClipper.checkSafeScaleValue(pt.x, maxAbs, "scalePath64");
-      InternalClipper.checkSafeScaleValue(pt.y, maxAbs, "scalePath64");
-      result.push({
-        x: InternalClipper.roundAwayFromZero(pt.x * scale),
-        y: InternalClipper.roundAwayFromZero(pt.y * scale)
-      });
-    }
-    return result;
+    return scalePathDTo64(path, scale);
   },
 
   scalePaths64(paths: PathsD, scale: number): Paths64 {
