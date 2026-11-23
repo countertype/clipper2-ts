@@ -475,4 +475,15 @@ describe('offset orientation (PolyClipping/Clipper2 64a9ecc)', () => {
     co.execute(-10, solution);
     expect(solution).toEqual(expected);
   });
+  test('sizes above 2^53 compare exactly, whatever the order of the paths', () => {
+    // twice the areas are 2^61 and 2^61 + 1 at the first size, which round to the same double
+    for (const size of [2 ** 30, 2 ** 40]) {
+      const hole = makeSquare(0, 0, size, true);
+      const outer = Clipper.makePath([0,0, size,0, size,size, 2,size, 1,size + 1, 1,size, 0,size]);
+      for (const paths of [[outer, hole], [hole, outer]]) {
+        // the larger path is the outer and the square its hole, so a ring is left
+        expect(Clipper.inflatePaths(paths, 10, JoinType.Miter, EndType.Polygon)).toHaveLength(2);
+      }
+    }
+  });
 });

@@ -29,10 +29,18 @@ export enum EndType {
   Round = 4
 }
 
-// a path's area, as its exact sign and twice its magnitude
+// a path's area, as its exact sign and twice its magnitude. The magnitude is a number while
+// that is exact and a bigint above 2^53, and the two compare exactly with < and >.
+type Magnitude = number | bigint;
+
 interface ExactArea {
   sign: number;
-  twiceMagnitude: number;
+  twiceMagnitude: Magnitude;
+}
+
+// a whole number as a number where that is exact, and as a bigint otherwise
+function exactMagnitude(value: bigint): Magnitude {
+  return value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : value;
 }
 
 function exactArea(path: Path64): ExactArea {
@@ -71,8 +79,9 @@ function exactArea(path: Path64): ExactArea {
 
   // above that the terms round, so their rounding errors are summed beside them. The
   // errors are whole numbers, and while their sum stays a safe integer the two sums
-  // together are the exact area.
-  if (allSafe) {
+  // together are the exact area. A span beyond 2^53 rounds the coordinates themselves
+  // as they are taken relative to the corner, so that is left to BigInt.
+  if (allSafe && span <= Number.MAX_SAFE_INTEGER) {
     const limit = Number.MAX_SAFE_INTEGER;
     let sum = 0, err = 0;
     let px = path[cnt - 1].x - minX, py = path[cnt - 1].y - minY;
@@ -93,20 +102,20 @@ function exactArea(path: Path64): ExactArea {
       py = y;
     }
     if (i === cnt) {
-      const twice = sum + err;
-      if (twice < 0) return { sign: -1, twiceMagnitude: -twice };
-      return { sign: twice > 0 ? 1 : 0, twiceMagnitude: twice };
+      // (both are whole numbers, and added as doubles they would round above 2^53)
+      const twice = BigInt(sum) + BigInt(err);
+      if (twice < 0) return { sign: -1, twiceMagnitude: exactMagnitude(-twice) };
+      return { sign: twice > 0 ? 1 : 0, twiceMagnitude: exactMagnitude(twice) };
     }
   }
 
-  // otherwise BigInt carries the sum. The sign is exact, and the magnitude is exact
-  // up to 2^53 and the nearest double above that.
+  // otherwise BigInt carries the sum
   let twice = BigInt(0);
   for (let i = 0, j = cnt - 1; i < cnt; j = i++) {
     twice += BigInt(path[j].x) * BigInt(path[i].y) - BigInt(path[i].x) * BigInt(path[j].y);
   }
-  if (twice < 0) return { sign: -1, twiceMagnitude: Number(-twice) };
-  return { sign: twice > 0 ? 1 : 0, twiceMagnitude: Number(twice) };
+  if (twice < 0) return { sign: -1, twiceMagnitude: exactMagnitude(-twice) };
+  return { sign: twice > 0 ? 1 : 0, twiceMagnitude: exactMagnitude(twice) };
 }
 
 // true when path lies inside a container, judged by the first of its vertices that locate
@@ -329,7 +338,7 @@ class Group {
 
     // sizes compare exactly, so paths of nearly equal size rank the same however they're wound.
     // The first path wins a tie.
-    let largest = 0;
+    let largest: Magnitude = 0;
     for (let i = 0; i < this.inPaths.length; i++) {
       const a = exactArea(this.inPaths[i]);
       this.areas.push(a);
@@ -454,7 +463,7 @@ export class ClipperOffset {
     if (!isMixed && !hasHoles) return;
 
     // TS: the lists below are only built once it's known they are needed
-    const sizes: number[] = [];      // of each path with area, over all groups
+    const sizes: Magnitude[] = [];   // of each path with area, over all groups
     const groupIdxs: number[] = [];  // its group
     const pathIdxs: number[] = [];   // and its index in that group
     const bounds: Rect64[] = [];
