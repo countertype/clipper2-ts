@@ -52,6 +52,7 @@ test('triangulate returns when two edges block each other\'s bridge', () => {
 
 // A path with every vertex on one sloped or vertical line kept addPath looking for a
 // local minimum for ever. C++ returns from that loop once it comes back round.
+// (The horizontal one never had a local minimum to find, and is here for completeness.)
 test('an entirely collinear path is skipped', () => {
   const square = Clipper.makePath([0,0, 100,0, 100,100, 0,100]);
   const flats = [[200,10, 210,20, 220,30], [200,10, 200,20, 200,30], [200,10, 250,10, 300,10]];

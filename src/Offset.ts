@@ -968,7 +968,7 @@ export class ClipperOffset {
     }
 
     // do the line start cap
-    if (Math.abs(this.groupDelta) < ClipperOffset.Tolerance) {
+    if (Math.abs(this.groupDelta) <= ClipperOffset.Tolerance) {
       this.pathOut.push(path[0]);
     } else {
       switch (endType) {
@@ -1001,7 +1001,7 @@ export class ClipperOffset {
     }
     
     // do the line end cap
-    if (Math.abs(this.groupDelta) < ClipperOffset.Tolerance) {
+    if (Math.abs(this.groupDelta) <= ClipperOffset.Tolerance) {
       this.pathOut.push(path[highI]);
     } else {
       switch (endType) {

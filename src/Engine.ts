@@ -1106,7 +1106,10 @@ private static topX(ae: Active, currentY: number): number {
   }
 
 protected executeInternal(ct: ClipType, fillRule: FillRule): void {
-  if (ct === ClipType.NoClip) return;
+  if (ct === ClipType.NoClip) {
+    this.succeeded = true; // (C++ resets first, so NoClip succeeds)
+    return;
+  }
   ClipperBase.openPathsEnabled = this.hasOpenPaths;
   this.zCallbackInternal = this.getZCallback();
   this.fillrule = fillRule;
@@ -1763,7 +1766,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
       owner.pipIndex = index;
     }
 
-    // Empty means the index declined this ring (see StripeIndex.build).
+    // Empty means the index declined this ring (see StripeIndex.buildFromRing).
     return this.path1InsidePath2(op1, owner.pts!, owner, index.empty ? null : index);
   }
 

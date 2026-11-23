@@ -161,9 +161,9 @@ describe('PolyTree nesting of rings that touch their owner', () => {
     return { outer: [outer], holes };
   }
 
-  // 40 notches keeps the owner on the brute-force test, 200 puts it on the
-  // stripe index; the cleaned owner path is cached on both routes
-  test.each([40, 200])('many holes touching one owner, %i notches', (n) => {
+  // 20 notches keeps the owner, at 60 vertices, on the brute-force test; 40 and
+  // 200 put it on the stripe index. The cleaned owner path is cached on both routes
+  test.each([20, 40, 200])('many holes touching one owner, %i notches', (n) => {
     const { outer, holes } = notchedDisc(n);
     const tree = runTree(ClipType.Difference, FillRule.NonZero, outer, holes);
     expect(tree.count).toBe(1);
@@ -213,14 +213,15 @@ describe('PolyTree nesting of rings that touch their owner', () => {
     expect(tree.child(0).count).toBe(2);
   });
 
-  test('random touching polygons: every ring sits under the smallest ring containing it', () => {
+  // far from zero, the touching rings are told apart relative to their own corner
+  test.each([0, 4e15])('random touching polygons at offset %d: every ring sits under the smallest ring containing it', (O) => {
     const rnd = mulberry32(1);
     const ri = (n: number) => Math.floor(rnd() * n);
     const S = 1e6, G = 6;
     const randPoly = (): Path64 => {
       const n = 3 + ri(5);
       const p: Path64 = [];
-      for (let i = 0; i < n; i++) p.push({ x: ri(G + 1) * S, y: ri(G + 1) * S });
+      for (let i = 0; i < n; i++) p.push({ x: O + ri(G + 1) * S, y: O + ri(G + 1) * S });
       return p;
     };
     const cts = [ClipType.Union, ClipType.Intersection, ClipType.Difference, ClipType.Xor];
@@ -260,9 +261,19 @@ describe('path2ContainsPath1 with every vertex of path1 on path2', () => {
     expect(InternalClipper.path2ContainsPath1(inNotch, lShape)).toBe(false);
   });
 
-  test('coordinates too large to sum exactly fall back to the bounds midpoint', () => {
-    const o = 4e15; // above Number.MAX_SAFE_INTEGER / 4
+  test('far from zero, the midpoints are taken relative to path1', () => {
+    const o = 4e15; // two of these can't be summed exactly
     expect(InternalClipper.path2ContainsPath1(diamond(o), square(o))).toBe(true);
+    // triangles that only share their long edge
+    const tri = (pts: number[][]): Path64 => pts.map(([x, y]) => ({ x: o + x, y: o + y }));
+    expect(InternalClipper.path2ContainsPath1(
+      tri([[16, 0], [16, 16], [0, 16]]), tri([[0, 0], [16, 0], [0, 16]]))).toBe(false);
+  });
+
+  test('paths too large for the midpoints fall back to the bounds midpoint', () => {
+    const big = (pts: number[][]): Path64 => pts.map(([x, y]) => ({ x: x * 2e15, y: y * 2e15 }));
+    expect(InternalClipper.path2ContainsPath1(
+      big([[0, -1], [1, 0], [0, 1], [-1, 0]]), big([[-1, -1], [1, -1], [1, 1], [-1, 1]]))).toBe(true);
   });
 });
 

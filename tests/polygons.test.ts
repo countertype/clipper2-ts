@@ -414,3 +414,25 @@ describe('Comprehensive Polygon Clipping Tests', () => {
     }
   });
 });
+
+// C++ resets before returning for NoClip, so the call succeeds
+describe('execute with ClipType.NoClip', () => {
+  const square = Clipper.makePath([0,0, 10,0, 10,10, 0,10]);
+
+  test('Clipper64 returns true and no paths', () => {
+    const c = new Clipper64();
+    c.addSubject([square]);
+    const solution: Paths64 = [];
+    expect(c.execute(ClipType.NoClip, FillRule.NonZero, solution)).toBe(true);
+    expect(solution).toEqual([]);
+    expect(c.execute(ClipType.NoClip, FillRule.NonZero, new PolyTree64())).toBe(true);
+  });
+
+  test('ClipperD returns true and no paths', () => {
+    const c = new ClipperD(2);
+    c.addSubjectPaths([square]);
+    const solution: PathsD = [];
+    expect(c.execute(ClipType.NoClip, FillRule.NonZero, solution)).toBe(true);
+    expect(solution).toEqual([]);
+  });
+});

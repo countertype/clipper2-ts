@@ -43,7 +43,8 @@ describe('Polygon Offset Tests', () => {
   // Comprehensive offset test using test data
   test('should handle offset test cases from Offsets.txt', () => {
     const testCases = TestDataParser.loadAllTestCases('Offsets.txt');
-    
+    expect(testCases.length).toBeGreaterThanOrEqual(2); // upstream runs the first two
+
     for (let i = 0; i < Math.min(testCases.length, 10); i++) {
       const testCase = testCases[i];
       
@@ -52,7 +53,8 @@ describe('Polygon Offset Tests', () => {
       
       const solution: Paths64 = [];
       clipperOffset.execute(1, solution);
-      
+      if (i < 2) expect(solution.length).toBeGreaterThan(0);
+
       if (solution.length > 0) {
         // Check orientation consistency
         const totalArea = Clipper.areaPaths(solution);
@@ -170,6 +172,10 @@ describe('Polygon Offset Tests', () => {
     
     solution = Clipper.inflatePaths(reversedSubject, 10, JoinType.Miter, EndType.Polygon);
     expect(solution).toHaveLength(1);
+
+    // the reversed outer alone erodes to nothing as well
+    solution = Clipper.inflatePaths([reversedSubject[0]], -50, JoinType.Miter, EndType.Polygon);
+    expect(solution).toHaveLength(0);
   });
 
   // Join type validation test
@@ -246,6 +252,7 @@ describe('Polygon Offset Tests', () => {
     const expected =
       Clipper.areaPaths(Clipper.inflatePaths([line], 20, JoinType.Miter, EndType.Joined)) +
       Clipper.areaPaths(Clipper.inflatePaths([corner], 20, JoinType.Miter, EndType.Joined));
+    expect(expected).toBe(73268.5); // as upstream
     expect(Clipper.areaPaths(Clipper.inflatePaths([line, corner], 20, JoinType.Miter, EndType.Joined))).toBe(expected);
     expect(Clipper.areaPaths(Clipper.inflatePaths([corner, line], 20, JoinType.Miter, EndType.Joined))).toBe(expected);
   });
