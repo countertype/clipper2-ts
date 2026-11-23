@@ -1,6 +1,6 @@
 // Comprehensive Polygon Clipping Tests
 import { describe, test, expect } from 'vitest';
-import { Clipper64, ClipperD, ClipType, FillRule, Paths64, PathsD, Clipper, ClipperOffset, PolyTree64 } from '../src';
+import { Clipper64, ClipperD, ClipType, FillRule, Paths64, PathsD, Clipper, ClipperOffset, PolyTree64, InternalClipper } from '../src';
 import { TestDataParser } from './test-data-parser';
 
 describe('Comprehensive Polygon Clipping Tests', () => {
@@ -31,8 +31,8 @@ describe('Comprehensive Polygon Clipping Tests', () => {
       c64.execute(testCase.clipType, testCase.fillRule, solution, solutionOpen);
       
 
-      const measuredCount = solution.length;
-      const measuredArea = Math.round(Clipper.areaPaths(solution)); // C#: (long)Clipper.Area(solution)
+      const measuredCount = solution.length + solutionOpen.length; // open paths count too, as upstream
+      const measuredArea = Math.trunc(Clipper.areaPaths(solution)); // (int64_t)Area(solution)
       const countDiff = testCase.expectedCount > 0 ? Math.abs(testCase.expectedCount - measuredCount) : 0;
       const areaDiff = testCase.expectedArea > 0 ? Math.abs(testCase.expectedArea - measuredArea) : 0;
       // as in C++, the area tolerance is a share of the measured area
@@ -90,8 +90,8 @@ describe('Comprehensive Polygon Clipping Tests', () => {
 
   // PolyTree consistency validation
   test('should produce consistent results between Paths64 and PolyTree64 output', () => {
-    // Test a representative subset for performance while maintaining coverage
-    const testCases = TestDataParser.loadAllTestCases('Polygons.txt').slice(0, 50);
+    // every case, as upstream
+    const testCases = TestDataParser.loadAllTestCases('Polygons.txt');
     
     for (let i = 0; i < testCases.length; i++) {
       const testCase = testCases[i];
@@ -135,9 +135,10 @@ describe('Comprehensive Polygon Clipping Tests', () => {
         const pathsFromTree = Clipper.polyTreeToPaths64(solutionTree);
         
         // Area comparison
-        const areaFromPaths = Math.round(Clipper.areaPaths(solutionPaths));
-        const areaFromTree = Math.round(solutionTree.area());
-        const areaFromTreePaths = Math.round(Clipper.areaPaths(pathsFromTree));
+        // (truncated, as the casts upstream do)
+        const areaFromPaths = Math.trunc(Clipper.areaPaths(solutionPaths));
+        const areaFromTree = Math.trunc(solutionTree.area());
+        const areaFromTreePaths = Math.trunc(Clipper.areaPaths(pathsFromTree));
         
         if (areaFromTree !== areaFromPaths || areaFromTreePaths !== areaFromPaths) {
           console.log(`Test ${testNum}: area mismatch - paths: ${areaFromPaths}, tree: ${areaFromTree}, treePaths: ${areaFromTreePaths}`);
@@ -434,5 +435,102 @@ describe('execute with ClipType.NoClip', () => {
     const solution: PathsD = [];
     expect(c.execute(ClipType.NoClip, FillRule.NonZero, solution)).toBe(true);
     expect(solution).toEqual([]);
+  });
+});
+
+// Ported from PolyClipping/Clipper2 CPP/Tests/TestPolygons.cpp
+describe('polygon tests ported from upstream TestPolygons.cpp', () => {
+  test('TestIntersectInt32SpanBeyondIntMax', () => {
+    // (upstream checks 32-bit points, whose spans overflow int; here the same points must simply meet at zero)
+    const ip = InternalClipper.getLineIntersectPt(
+      { x: -2000000000, y: -1000000000 }, { x: 2000000000, y: 1000000000 },
+      { x: -1000000000, y: 2000000000 }, { x: 1000000000, y: -2000000000 });
+    expect(ip).not.toBeNull();
+    expect([ip!.x, ip!.y]).toEqual([0, 0]);
+  });
+
+  test('TestHorzSpikes (#720)', () => {
+    const paths: Paths64 = [
+      Clipper.makePath([1600,0, 1600,100, 2050,100, 2050,300, 450,300, 450,0]),
+      Clipper.makePath([1800,200, 1800,100, 1600,100, 2000,100, 2000,200])
+    ];
+    const c = new Clipper64();
+    c.addSubject(paths);
+    const solution: Paths64 = [];
+    c.execute(ClipType.Union, FillRule.NonZero, solution);
+    expect(solution.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('TestCollinearOnMacOs (#777)', () => {
+    const subject: Paths64 = [
+      Clipper.makePath([0,-453054451, 0,-433253797, -455550000,0]),
+      Clipper.makePath([0,-433253797, 0,0, -455550000,0])
+    ];
+    const clipper = new Clipper64();
+    clipper.preserveCollinear = false;
+    clipper.addSubject(subject);
+    const solution: Paths64 = [];
+    clipper.execute(ClipType.Union, FillRule.NonZero, solution);
+    expect(solution).toHaveLength(1);
+    expect(solution[0]).toHaveLength(3);
+    expect(Clipper.isPositive(solution[0])).toBe(Clipper.isPositive(subject[0]));
+  });
+
+  test('TestIntersectPointIsNotFused', () => {
+    // both exact intersections have a coordinate of -100.5, and the tie rounds to even
+    let ip = InternalClipper.getLineIntersectPt(
+      { x: -207, y: -383 }, { x: 350, y: 194 }, { x: 347, y: 193 }, { x: -206, y: -384 });
+    expect(ip).not.toBeNull();
+    expect([ip!.x, ip!.y]).toEqual([66, -100]);
+    ip = InternalClipper.getLineIntersectPt(
+      { x: -383, y: -207 }, { x: 194, y: 350 }, { x: 193, y: 347 }, { x: -384, y: -206 });
+    expect(ip).not.toBeNull();
+    expect([ip!.x, ip!.y]).toEqual([-100, 66]);
+  });
+});
+
+describe('sweep details that differed from upstream', () => {
+  const mk = (paths: number[][][]): Paths64 => paths.map(p => p.map(([x, y]) => ({ x, y })));
+
+  test('a left bound is placed after a joined pair, even one out of curX order', () => {
+    // the search for its place starts from the first edge, as in C++
+    const c = new Clipper64();
+    c.addSubject(mk([[[0,2],[3,0],[2,1],[0,0],[2,0],[2,1],[1,1]]]));
+    c.addClip(mk([
+      [[0,2],[3,3],[0,2],[0,3],[2,0],[2,0]],
+      [[1,2],[3,1],[1,0],[2,2],[1,2],[0,0],[1,2],[0,2]]
+    ]));
+    const solution: Paths64 = [];
+    c.execute(ClipType.Union, FillRule.EvenOdd, solution);
+    expect(solution.map(p => p.map(q => [q.x, q.y])))
+      .toEqual([[[2,0],[2,1],[3,1],[2,2],[2,1],[0,2],[1,1],[0,0]]]);
+  });
+
+  test('a clipper run inside a Z callback does not disturb the one that called it', () => {
+    // the outer clipper has open paths and the inner one has none
+    const run = (runInner: boolean): [boolean, Paths64, Paths64] => {
+      const outer = new Clipper64();
+      outer.zCallback = () => {
+        if (!runInner) return;
+        const inner = new Clipper64();
+        inner.addSubject(mk([[[0,0],[5,0],[5,5],[0,5]]]));
+        inner.execute(ClipType.Union, FillRule.NonZero, []);
+      };
+      outer.addOpenSubject(mk([[[-5,5],[15,5]], [[-5,2],[15,8]]]));
+      outer.addSubject(mk([[[1,1],[9,1],[9,9],[1,9]]]));
+      outer.addClip(mk([[[0,0],[10,0],[10,10],[0,10]], [[3,3],[12,3],[12,7],[3,7]]]));
+      const closed: Paths64 = [], open: Paths64 = [];
+      const ok = outer.execute(ClipType.Intersection, FillRule.NonZero, closed, open);
+      return [ok, closed, open];
+    };
+    const plain = run(false);
+    expect(plain[0]).toBe(true);
+    expect(plain[2].length).toBeGreaterThan(0);
+    expect(run(true)).toEqual(plain);
+  });
+
+  test('stripDuplicates keeps the one point of a closed path of repeats, as in C++', () => {
+    expect(Clipper.stripDuplicates(mk([[[3,3],[3,3],[3,3]]])[0], true)).toEqual([{ x: 3, y: 3 }]);
+    expect(Clipper.stripDuplicates(mk([[[3,3],[4,4],[3,3]]])[0], true)).toEqual([{ x: 3, y: 3 }, { x: 4, y: 4 }]);
   });
 });

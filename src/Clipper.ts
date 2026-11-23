@@ -697,7 +697,8 @@ export function stripDuplicates(path: Path64, isClosedPath: boolean): Path64 {
       result.push(lastPt);
     }
   }
-  if (isClosedPath && Point64Utils.equals(lastPt, result[0])) {
+  // (a single point is kept, as in C++)
+  if (isClosedPath && result.length > 1 && Point64Utils.equals(lastPt, result[0])) {
     result.pop();
   }
   return result;

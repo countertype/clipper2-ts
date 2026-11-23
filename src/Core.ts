@@ -329,6 +329,8 @@ function dotProductSign(pt1: Point64, pt2: Point64, pt3: Point64): number {
   return bigSum > B0 ? 1 : -1;
 }
 
+// TS: summed exactly once the coordinates are too large for the products to be exact in
+// doubles, where C++ accumulates in doubles; the two can differ in the last bits there
 function icArea(path: Path64): number {
   // https://en.wikipedia.org/wiki/Shoelace_formula
   const cnt = path.length;
@@ -409,6 +411,9 @@ function checkCastInt64(val: number): number {
 // The point will be constrained to seg1. However, it's possible that the point
 // won't be inside seg2, even when it hasn't been constrained (ie inside seg1).
 // Returns Point64 | null to avoid allocating a wrapper object on every call.
+// TS: the determinant and the numerator carry their rounding error, where C++ (without
+// CLIPPER2_HI_PRECISION) multiplies in plain doubles. The results agree while every delta
+// is below 2^26; beyond that this one is the closer, and can differ from C++ by a unit.
 function getLineIntersectPt(
   seg1a: Point64, seg1b: Point64,
   seg2a: Point64, seg2b: Point64
@@ -488,6 +493,8 @@ function getLineIntersectPtD(
   return { success: true, ip };
 }
 
+// TS: the side tests are exact, where C++ takes cross products in doubles. They agree
+// below about 1e9.
 function segsIntersect(
   seg1a: Point64, seg1b: Point64, 
   seg2a: Point64, seg2b: Point64, 
@@ -532,10 +539,12 @@ function icGetBounds(path: Path64): Rect64 {
     if (pt.y > result.bottom) result.bottom = pt.y;
   }
   
+  // TS: an empty path has zero bounds, as in C#; C++ returns its invalid rect
   return result.left === Number.MAX_SAFE_INTEGER ? 
     { left: 0, top: 0, right: 0, bottom: 0 } : result;
 }
 
+// TS: the projection carries its rounding error, as getLineIntersectPt does
 function getClosestPtOnSegment(offPt: Point64, seg1: Point64, seg2: Point64): Point64 {
   if (seg1.x === seg2.x && seg1.y === seg2.y) return { x: seg1.x, y: seg1.y, z: 0 };  // Return copy, not reference
   

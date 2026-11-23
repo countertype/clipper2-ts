@@ -790,6 +790,9 @@ export class ClipperBase {
       }
       zCallback(ae2.bot, ae2.top, ae1.bot, ae1.top, intersectPt);
     }
+    // TS: openPathsEnabled is shared by every clipper, where C++ keeps has_open_paths_
+    // on each. A callback that runs another clipper leaves that one's value behind.
+    ClipperBase.openPathsEnabled = this.hasOpenPaths;
   }
 
   // Helper functions
@@ -1141,7 +1144,6 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
   private insertLocalMinimaIntoAEL(botY: number): void {
     // Add any local minima (if any) at BotY ...
     // NB horizontal local minima edges should contain locMin.vertex.prev
-    let prevLeft: Active | null = null;
     while (this.hasLocMinAtY(botY)) {
       const localMinima = this.popLocalMinima();
       let leftBound: Active | null;
@@ -1204,10 +1206,7 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
 
       let contributing: boolean;
       leftBound!.isLeftBound = true;
-      // minima at one y come in ascending x, so the last left bound is a place to start from
-      this.insertLeftEdge(leftBound!,
-        prevLeft !== null && prevLeft.curX < leftBound!.curX ? prevLeft : null);
-      prevLeft = leftBound;
+      this.insertLeftEdge(leftBound!);
 
       if (!ClipperBase.openPathsEnabled) {
         // Closed-path-only fast path.
@@ -1287,7 +1286,8 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     let rightX2 = this.horzRight;
 
     if (ClipperBase.isHotEdge(horz)) {
-      const op = this.addOutPt(horz, { x: horz.curX, y });
+      const op = this.addOutPt(horz,
+        horz.bot.z === undefined ? { x: horz.curX, y } : { x: horz.curX, y, z: horz.bot.z });
       this.addToHorzSegList(op);
     }
 
@@ -1410,7 +1410,8 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
     let rightX2 = this.horzRight;
 
     if (ClipperBase.isHotEdge(horz)) {
-      const op = this.addOutPt(horz, { x: horz.curX, y });
+      const op = this.addOutPt(horz,
+        horz.bot.z === undefined ? { x: horz.curX, y } : { x: horz.curX, y, z: horz.bot.z });
       this.addToHorzSegList(op);
     }
 
@@ -2219,18 +2220,20 @@ protected executeInternal(ct: ClipType, fillRule: FillRule): void {
 
   // TS: 'after' is an edge already in the AEL with a smaller curX, or null. The AEL is
   // ordered by curX, so the search can start there and finds the same place.
-  private insertLeftEdge(ae: Active, after: Active | null): void {
+  // (the search always starts from the first edge, as in C++: joined edges are kept
+  // together even out of curX order, so a later starting point can skip the right place)
+  private insertLeftEdge(ae: Active): void {
     if (this.actives === null) {
       ae.prevInAEL = null;
       ae.nextInAEL = null;
       this.actives = ae;
-    } else if (after === null && !this.isValidAelOrder(this.actives, ae)) {
+    } else if (!this.isValidAelOrder(this.actives, ae)) {
       ae.prevInAEL = null;
       ae.nextInAEL = this.actives;
       this.actives.prevInAEL = ae;
       this.actives = ae;
     } else {
-      let ae2 = after !== null ? after : this.actives;
+      let ae2 = this.actives;
       while (ae2.nextInAEL !== null && this.isValidAelOrder(ae2.nextInAEL, ae)) {
         ae2 = ae2.nextInAEL;
       }
@@ -2814,7 +2817,8 @@ protected newOutRec(): OutRec {
         resultOp = null; 
         switch (this.cliptype) {
           case ClipType.Union:
-            if (e1Wc2 > 0 && e2Wc2 > 0) return;
+            // (C++ form; the two wind counts are those of adjacent edges of one type)
+            if (!(e1Wc2 <= 0 && e2Wc2 <= 0)) return;
             resultOp = this.addLocalMinPoly(ae1, ae2, pt);
             break;
 
@@ -3290,8 +3294,8 @@ protected buildTree(polytree: PolyPathBase, solutionOpen: Paths64): void {
   }
 
   private isValidClosedPath(op: OutPt | null): boolean {
-    return op !== null && op.next !== op &&
-      (op.next !== op.prev || !ClipperBase.isVerySmallTriangle(op));
+    return op !== null && op.next !== op && op.next !== op.prev &&
+      !ClipperBase.isVerySmallTriangle(op);
   }
 
   private disposeOutPt(op: OutPt): OutPt | null {
@@ -3341,6 +3345,8 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
   if (this.zCallbackInternal) {
     (this.zCallbackInternal as ZCallback64)(
       prevOp.pt, splitOp.pt, splitOp.next!.pt, nextNextOp.pt, ip);
+    // the callback may have run another clipper (see setZ)
+    ClipperBase.openPathsEnabled = this.hasOpenPaths;
   }
 
   const doubleArea1 = ClipperBase.areaOutPt(prevOp);
@@ -3372,6 +3378,8 @@ private doSplitOp(outrec: OutRec, splitOp: OutPt): void {
   // already covers (the loop's -1 cancels the remainder's +1): dropping it
   // fills that hole. Keep such a loop as its own (hole) path.
   if (absDoubleArea2 < B1) return; // as in C++
+  // TS: both areas are doubled here. C++ compares the triangle's doubled area with the
+  // path's own area, which keeps a twist of half the path's size as a path wound the wrong way.
   const isHoleOfRemainder = !(absDoubleArea2 > absDoubleArea1) &&
     ((doubleArea2 > B0) !== (doubleArea1 > B0));
   if (isHoleOfRemainder &&
@@ -3581,7 +3589,8 @@ public addPaths(paths: Paths64, polytype: PathType, isOpen: boolean = false): vo
       // clipper is still left clean for the next call
       try {
         this.executeInternal(clipType, fillRule);
-        this.buildPaths(solutionClosed, solutionOpen || []);
+        // (nothing is built after a failed sweep, as in C++)
+        if (this.succeeded) this.buildPaths(solutionClosed, solutionOpen || []);
       } finally {
         this.clearSolutionOnly();
       }
@@ -3597,7 +3606,7 @@ public addPaths(paths: Paths64, polytype: PathType, isOpen: boolean = false): vo
       
       try {
         this.executeInternal(clipType, fillRule);
-        this.buildTree(polytree, openPaths || []);
+        if (this.succeeded) this.buildTree(polytree, openPaths || []);
       } finally {
         this.clearSolutionOnly();
       }
@@ -3614,10 +3623,15 @@ export class ClipperD extends ClipperBase {
   constructor(roundingDecimalPrecision: number = 2) {
     super();
     InternalClipper.checkPrecision(roundingDecimalPrecision);
+    // TS: scaled by a power of ten, as in C#, so coordinates are rounded to the decimal
+    // places asked for. C++ scales by the next power of two above it (128 for 2 places),
+    // which keeps the scaling exact but puts results on a binary grid.
     this.scale = Math.pow(10, roundingDecimalPrecision);
     this.invScale = 1 / this.scale;
   }
 
+  // TS: the callback is given the scaled integer points, as in C#; C++ scales them back
+  // to PointD first. Z values of the input paths are not carried through ClipperD.
   protected getZCallback(): ZCallbackD | undefined {
     return this.zCallback;
   }
@@ -3741,7 +3755,7 @@ export class ClipperD extends ClipperBase {
       try {
         this.executeInternal(clipType, fillRule);
         // Call regular buildPaths which includes cleanCollinear and fixSelfIntersects
-        this.buildPaths(solClosed64, solOpen64);
+        if (this.succeeded) this.buildPaths(solClosed64, solOpen64);
       } finally {
         this.clearSolutionOnly();
       }
@@ -3770,7 +3784,7 @@ export class ClipperD extends ClipperBase {
       
       try {
         this.executeInternal(clipType, fillRule);
-        this.buildTreeD(polytree, openPaths || []);
+        if (this.succeeded) this.buildTreeD(polytree, openPaths || []);
       } finally {
         this.clearSolutionOnly();
       }
