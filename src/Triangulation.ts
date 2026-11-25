@@ -35,10 +35,10 @@ function warnDeprecated(): void {
   }
 }
 
-/** @deprecated Triangulation will be removed in the next release. See https://github.com/countertype/clipper2-ts/issues/41 */
 // raised inside the triangulation when its edges and vertices stop agreeing; execute turns it into fail
 class TriangulationError extends Error {}
 
+/** @deprecated Triangulation will be removed in the next release. See https://github.com/countertype/clipper2-ts/issues/41 */
 export enum TriangulateResult {
   success,
   fail,
@@ -157,33 +157,73 @@ export class Delaunay {
     this.fastMath = Math.max(maxDeltaX, maxDeltaY) <= Delaunay.maxSafeDelta;
   }
 
-  // TS: a path that tryAddPath can't walk, because a spike of no width hides its only local
-  // minimum or its edges keep returning to one vertex, is tried once more without its spikes.
-  // C++ drops the first kind and does not return from the second.
+  // TS: a path with a repeated point or a spike of no width is walked without them. C++
+  // walks it as given, and a spike beside a local minimum then hides the minimum, sets the
+  // orientation wrongly or keeps the walk from closing.
   private addPath(path: Path64): void {
-    if (this.tryAddPath(path)) return;
-    const cleaned = this.withoutSpikes(path);
-    if (cleaned.length >= 3 && cleaned.length < path.length) this.tryAddPath(cleaned);
+    let walked = path;
+    if (this.hasSpike(path)) {
+      walked = this.withoutSpikes(path);
+      if (walked.length < 3) return; // nothing but spikes, so no area to triangulate
+    }
+    // a path that could not be walked stays listed, so restoreBoundary reports it
+    this.tryAddPath(walked);
+    this.addedPaths.push(walked);
   }
 
-  // the path with repeated points and every vertex on the line of its neighbours taken out,
-  // until none is left
+  private static samePoint(a: Point64, b: Point64): boolean {
+    return a.x === b.x && a.y === b.y;
+  }
+
+  // b lies on the line through a and c, and the path reverses there. a, b and c differ.
+  private turnsBack(a: Point64, b: Point64, c: Point64): boolean {
+    return this.crossProductSign(a, b, c) === 0 &&
+      !(Math.sign(b.x - a.x) === Math.sign(c.x - b.x) && Math.sign(b.y - a.y) === Math.sign(c.y - b.y));
+  }
+
+  private hasSpike(path: Path64): boolean {
+    const len = path.length;
+    if (len < 3) return false;
+    let prev = path[len - 2];
+    let cur = path[len - 1];
+    for (let i = 0; i < len; i++) {
+      const next = path[i];
+      if (Delaunay.samePoint(cur, next) || Delaunay.samePoint(prev, cur) ||
+        this.turnsBack(prev, cur, next)) return true;
+      prev = cur;
+      cur = next;
+    }
+    return false;
+  }
+
+  // the path with repeated points and spikes of no width taken out, in one pass; vertices
+  // on a straight run are kept. Empty when fewer than three points are left.
   private withoutSpikes(path: Path64): Path64 {
-    const pts = path.slice();
-    let changed = true;
-    while (changed && pts.length >= 3) {
-      changed = false;
-      for (let i = 0; i < pts.length && pts.length >= 3; i++) {
-        const prev = pts[(i + pts.length - 1) % pts.length];
-        const next = pts[(i + 1) % pts.length];
-        if (this.crossProductSign(prev, pts[i], next) === 0) {
-          pts.splice(i--, 1);
-          changed = true;
-        }
+    const out: Path64 = [];
+    for (const p of path) {
+      for (; ;) {
+        const n = out.length;
+        if (n >= 1 && Delaunay.samePoint(out[n - 1], p)) break;
+        if (n >= 2 && this.turnsBack(out[n - 2], out[n - 1], p)) { out.pop(); continue; }
+        out.push(p);
+        break;
       }
     }
-    return pts;
+    // the same two tests across the join of the last point and the first
+    let head = 0;
+    for (; ;) {
+      const n = out.length;
+      if (n - head < 3) return [];
+      if (Delaunay.samePoint(out[n - 1], out[head]) ||
+        this.turnsBack(out[n - 2], out[n - 1], out[head])) out.pop();
+      else if (this.turnsBack(out[n - 1], out[head], out[head + 1])) head++;
+      else break;
+    }
+    return head === 0 ? out : out.slice(head);
   }
+
+  // the paths as walked, which is what restoreBoundary has to find in the result
+  private addedPaths: Paths64 = [];
 
   // false when the path could not be walked, with nothing of it left behind
   private tryAddPath(path: Path64): boolean {
@@ -317,6 +357,7 @@ export class Delaunay {
       totalVertexCount += path.length;
     if (totalVertexCount === 0) return false;
 
+    this.addedPaths = [];
     for (const path of paths)
       this.addPath(path);
 
@@ -926,8 +967,9 @@ export class Delaunay {
       return this.executeInternal(paths);
     } catch (e) {
       if (!(e instanceof TriangulationError)) throw e;
-      this.cleanUp();
       return { result: TriangulateResult.fail, solution: [] };
+    } finally {
+      this.cleanUp(); // whatever the exit, nothing of this call is left for the next
     }
   }
 
@@ -954,6 +996,7 @@ export class Delaunay {
     }
     // path orientation is fine so ...
     this.locMinStack.length = 0;
+    const boundaryPaths = this.addedPaths;
 
     this.allEdges.sort((a, b) => {
       if (a.vL.pt.x < b.vL.pt.x) return -1;
@@ -1057,7 +1100,7 @@ export class Delaunay {
 
     this.legalize();
     if (this.preserveCollinear) {
-      if (!this.restoreBoundary(paths)) {
+      if (!this.restoreBoundary(boundaryPaths)) {
         this.cleanUp();
         return { result: TriangulateResult.fail, solution: sol };
       }

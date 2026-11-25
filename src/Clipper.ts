@@ -161,6 +161,7 @@ function isDecimalRectCall(rect: Rect64 | RectD, precision?: number): boolean {
 
 export function rectClip(rect: Rect64, paths: Paths64): Paths64;
 export function rectClip(rect: Rect64, path: Path64): Paths64;
+/** Clips as decimals only when a precision is given or the rect has a fraction. For decimal paths in a rect that may be whole numbers, pass a precision or use `rectClipD`. */
 export function rectClip(rect: RectD, paths: PathsD, precision?: number): PathsD;
 export function rectClip(rect: RectD, path: PathD, precision?: number): PathsD;
 export function rectClip(rect: Rect64 | RectD, pathsOrPath: Paths64 | Path64 | PathsD | PathD, precision?: number): Paths64 | PathsD {
@@ -187,6 +188,7 @@ export function rectClipD(rect: RectD, pathsOrPath: PathsD | PathD, precision: n
 
 export function rectClipLines(rect: Rect64, paths: Paths64): Paths64;
 export function rectClipLines(rect: Rect64, path: Path64): Paths64;
+/** Clips as decimals only when a precision is given or the rect has a fraction. For decimal paths in a rect that may be whole numbers, pass a precision or use `rectClipLinesD`. */
 export function rectClipLines(rect: RectD, paths: PathsD, precision?: number): PathsD;
 export function rectClipLines(rect: RectD, path: PathD, precision?: number): PathsD;
 export function rectClipLines(rect: Rect64 | RectD, pathsOrPath: Paths64 | Path64 | PathsD | PathD, precision?: number): Paths64 | PathsD {

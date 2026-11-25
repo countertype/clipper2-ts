@@ -106,3 +106,32 @@ test('rings that touch themselves give a result and do not throw', () => {
     expect(solution).toEqual([]);
   }
 });
+
+// A spike beside the local minimum the walk starts from used to set the orientation
+// wrongly, and triangulate returned success with half of the quad missing.
+test('a spike beside the starting local minimum leaves the polygon whole', () => {
+  const area = (tris: ReturnType<typeof triangulate>['solution']): number =>
+    tris.reduce((sum, tri) => sum + Math.abs(Clipper.area(tri)), 0);
+  const quad = triangulate([Clipper.makePath([12,-23, 23,-71, -12,64, 67,46])]);
+  const spiked = triangulate([Clipper.makePath([12,-23, 23,-71, -12,64, -12,60, -12,64, 67,46])]);
+  expect(quad.result).toBe(TriangulateResult.success);
+  expect(spiked.result).toBe(TriangulateResult.success);
+  expect(area(spiked.solution)).toBe(area(quad.solution));
+});
+
+// preserveCollinear used to look for the spike itself in the result and fail.
+test('preserveCollinear accepts paths with spikes and paths that are only a spike', () => {
+  const area = (tris: ReturnType<typeof triangulate>['solution']): number =>
+    tris.reduce((sum, tri) => sum + Math.abs(Clipper.area(tri)), 0);
+  const spiked = triangulate([Clipper.makePath([0,0, 10,0, 10,5, 15,5, 10,5, 10,10, 0,10])], true, true);
+  expect(spiked.result).toBe(TriangulateResult.success);
+  expect(area(spiked.solution)).toBe(100);
+  // the vertex on the straight side is kept
+  expect(spiked.solution.some(tri => tri.some(pt => pt.x === 10 && pt.y === 5))).toBe(true);
+
+  const square = Clipper.makePath([0,0, 100,0, 100,100, 0,100]);
+  const flat = Clipper.makePath([200,10, 195,0, 200,10, 205,0]);
+  const both = triangulate([square, flat], true, true);
+  expect(both.result).toBe(TriangulateResult.success);
+  expect(area(both.solution)).toBe(10000);
+});

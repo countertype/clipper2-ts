@@ -1,11 +1,11 @@
 // Exercise the package.json exports map through Node's own loaders rather than
 // Vitest's source resolver. A package can reference itself by name when it has
 // an "exports" field, so no pack or install is needed. Requires a built dist/,
-// which tests/build-dist.ts rebuilds from the current source before each test run.
-import { execFileSync } from 'node:child_process';
+// which is rebuilt from the current source before these tests run.
+import { execFileSync, execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, test } from 'vitest';
+import { beforeAll, describe, expect, test } from 'vitest';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const supportsRequireEsm = Boolean(process.features.require_module);
@@ -52,6 +52,17 @@ function node(source: string, mode: 'module' | 'commonjs'): void {
 }
 
 describe('package exports', () => {
+  // Without this the tests below check whatever build was made last. Run through a shell
+  // so npm is found on Windows, and with the compiler's output kept for the error.
+  beforeAll(() => {
+    try {
+      execSync('npm run build', { cwd: root, stdio: 'pipe' });
+    } catch (err) {
+      const e = err as { stdout?: Buffer; stderr?: Buffer };
+      throw new Error(`npm run build failed:\n${e.stdout?.toString() ?? ''}${e.stderr?.toString() ?? ''}`, { cause: err });
+    }
+  }, 120_000);
+
   test('dist is built', () => {
     expect(existsSync(new URL('../dist/index.js', import.meta.url)),
       'dist/index.js is missing; run npm run build').toBe(true);

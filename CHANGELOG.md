@@ -41,7 +41,8 @@ All changes to this project will be documented in this file
 - `Clipper`: `stripDuplicates` and `stripNearDuplicates` keep the one point of a closed path of repeats, and `stripNearDuplicates` drops every closing point near the first, as in C++
 - `Clipper`: `ramerDouglasPeuckerD` compares end points exactly, as in C++
 - `Minkowski`: `sumD` and `diffD` round half away from zero when scaling, as everywhere else and as in C++
-- `Triangulation`: a path that is entirely collinear, or whose edges keep returning to one vertex, no longer keeps `triangulate` from returning or runs it out of memory; spikes of no width are left out and the rest of the path is triangulated
+- `Triangulation`: a path that is entirely collinear, or whose edges keep returning to one vertex, no longer keeps `triangulate` from returning or runs it out of memory
+- `Triangulation`: repeated points and spikes of no width are taken out of a path before it is walked. A spike beside a local minimum could give `success` with part of the polygon missing, and with `preserveCollinear` any spike gave `fail`. A path that is nothing but spikes is skipped
 - `Triangulation`: an inconsistency met on self-touching rings is returned as `fail` instead of being thrown
 - `Offset`: path sizes are compared exactly above 2^53, so two paths of nearly equal area no longer give a result that depends on their order
 - `Offset`: square joins round as the other joins do, without throwing near the top of the safe integer range
