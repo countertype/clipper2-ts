@@ -42,8 +42,19 @@ describe('Open Path/Line Clipping Tests', () => {
         const countDiff = Math.abs(solution.length - testCase.expectedCount);
         expect(countDiff).toBeLessThan(2);
       }
+
+      // the C++ check (TestMultipleLines): closed and open paths counted together
+      if (testNum > 1) {
+        const countDiff = Math.abs(solution.length + solutionOpen.length - testCase.expectedCount);
+        expect(countDiff).toBeLessThanOrEqual(8);
+        if (testCase.expectedCount !== 0) expect(countDiff / testCase.expectedCount).toBeLessThanOrEqual(0.1);
+      }
     }
   );
+
+  test('all 16 cases of Lines.txt are read', () => {
+    expect(allLineTestCases.length).toBeGreaterThanOrEqual(16);
+  });
 
   // Specific validation for test case 1
   test('should correctly handle test case 1 with specific geometric validation', () => {

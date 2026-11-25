@@ -97,48 +97,41 @@ export type ZCallbackD = (
 const maxSafeInteger = Number.MAX_SAFE_INTEGER;
 const maxDeltaForSafeProduct = Math.floor(Math.sqrt(maxSafeInteger));
 
-function isSafeProduct(a: number, b: number): boolean {
-  if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b)) return false;
-  if (a === 0 || b === 0) return true;
-  return Math.abs(a) <= maxSafeInteger / Math.abs(b);
+// the rounding error of the product p = a * b (Dekker's product, with Veltkamp's split)
+function productError(a: number, b: number, p: number): number {
+  let t = 134217729 * a; // 2^27 + 1
+  const ah = t - (t - a), al = a - ah;
+  t = 134217729 * b;
+  const bh = t - (t - b), bl = b - bh;
+  return al * bl - (((p - ah * bh) - al * bh) - ah * bl);
 }
 
-function isSafeSum(a: number, b: number): boolean {
-  return Math.abs(a) + Math.abs(b) <= maxSafeInteger;
-}
-
+// a * b - c * d. Below 2^26 the products and their difference are exact. Above that
+// the rounding errors of the products and of their difference are added back, which
+// gives the exact value to within rounding.
 function safeMultiplyDifference(a: number, b: number, c: number, d: number): number {
-  if (isSafeProduct(a, b) && isSafeProduct(c, d)) {
-    const prod1 = a * b;
-    const prod2 = c * d;
-    if (isSafeSum(prod1, prod2)) {
-      return prod1 - prod2;
-    }
+  if (Math.abs(a) < 67108864 && Math.abs(b) < 67108864 &&
+    Math.abs(c) < 67108864 && Math.abs(d) < 67108864) {
+    return (a * b) - (c * d);
   }
-
-  if (Number.isSafeInteger(a) && Number.isSafeInteger(b) &&
-    Number.isSafeInteger(c) && Number.isSafeInteger(d)) {
-    return Number((BigInt(a) * BigInt(b)) - (BigInt(c) * BigInt(d)));
-  }
-
-  return (a * b) - (c * d);
+  const p = a * b, q = c * d;
+  const s = p - q;
+  const bv = p - s;
+  const sErr = (p - (s + bv)) + (bv - q);
+  return s + (sErr + (productError(a, b, p) - productError(c, d, q)));
 }
 
+// a * b + c * d, as safeMultiplyDifference
 function safeMultiplySum(a: number, b: number, c: number, d: number): number {
-  if (isSafeProduct(a, b) && isSafeProduct(c, d)) {
-    const prod1 = a * b;
-    const prod2 = c * d;
-    if (isSafeSum(prod1, prod2)) {
-      return prod1 + prod2;
-    }
+  if (Math.abs(a) < 67108864 && Math.abs(b) < 67108864 &&
+    Math.abs(c) < 67108864 && Math.abs(d) < 67108864) {
+    return (a * b) + (c * d);
   }
-
-  if (Number.isSafeInteger(a) && Number.isSafeInteger(b) &&
-    Number.isSafeInteger(c) && Number.isSafeInteger(d)) {
-    return Number((BigInt(a) * BigInt(b)) + (BigInt(c) * BigInt(d)));
-  }
-
-  return (a * b) + (c * d);
+  const p = a * b, q = c * d;
+  const s = p + q;
+  const bv = s - p;
+  const sErr = (p - (s - bv)) + (q - bv);
+  return s + (sErr + (productError(a, b, p) + productError(c, d, q)));
 }
 
 // BigInt constants — avoid BigInt literal syntax (0n, 4n, etc.) to sidestep
@@ -336,6 +329,8 @@ function dotProductSign(pt1: Point64, pt2: Point64, pt3: Point64): number {
   return bigSum > B0 ? 1 : -1;
 }
 
+// TS: summed exactly once the coordinates are too large for the products to be exact in
+// doubles, where C++ accumulates in doubles; the two can differ in the last bits there
 function icArea(path: Path64): number {
   // https://en.wikipedia.org/wiki/Shoelace_formula
   const cnt = path.length;
@@ -400,6 +395,13 @@ function roundToEven(value: number): number {
   return r;
 }
 
+// Rounds half away from zero, as std::round does in C++. Math.round rounds a negative
+// half up (-2.5 to -2) and returns -0 for values between -0.5 and 0.
+function roundAwayFromZero(value: number): number {
+  // (adding 0 turns -0 into 0, including for an input of -0)
+  return value > 0 ? Math.round(value) : -Math.round(-value) + 0;
+}
+
 function checkCastInt64(val: number): number {
   if ((val >= IC_MaxCoord) || (val <= -IC_MaxCoord)) return IC_Invalid64;
   return Math.round(val);
@@ -409,10 +411,23 @@ function checkCastInt64(val: number): number {
 // The point will be constrained to seg1. However, it's possible that the point
 // won't be inside seg2, even when it hasn't been constrained (ie inside seg1).
 // Returns Point64 | null to avoid allocating a wrapper object on every call.
+// TS: the determinant and the numerator carry their rounding error, where C++ (without
+// CLIPPER2_HI_PRECISION) multiplies in plain doubles. The results agree while every delta
+// is below 2^26; beyond that this one is the closer, and can differ from C++ by a unit.
 function getLineIntersectPt(
-  ln1a: Point64, ln1b: Point64, 
-  ln2a: Point64, ln2b: Point64
+  seg1a: Point64, seg1b: Point64,
+  seg2a: Point64, seg2b: Point64
 ): Point64 | null {
+  // segments are evaluated from their bottom end, as the sweep does, so that
+  // a shared edge rounds to the same point whichever way round it is given
+  let ln1a = seg1a, ln1b = seg1b, ln2a = seg2a, ln2b = seg2b;
+  if (seg1b.y > seg1a.y || (seg1b.y === seg1a.y && seg1b.x < seg1a.x)) {
+    ln1a = seg1b; ln1b = seg1a;
+  }
+  if (seg2b.y > seg2a.y || (seg2b.y === seg2a.y && seg2b.x < seg2a.x)) {
+    ln2a = seg2b; ln2b = seg2a;
+  }
+
   const dy1 = (ln1b.y - ln1a.y);
   const dx1 = (ln1b.x - ln1a.x);
   const dy2 = (ln2b.y - ln2a.y);
@@ -436,11 +451,11 @@ function getLineIntersectPt(
   } else if (t >= 1.0) {
     return { x: ln1b.x, y: ln1b.y, z: (ln1b.z || 0) };
   } else {
-    // avoid using constructor (and rounding too) as they affect performance
-    // Use Math.trunc to match C# (long) cast behavior which truncates towards zero
+    // rounded, so that 'ip' stays within half a unit of the crossing
+    // (Math.round gives -0 for values from -0.5 to -0; adding 0 makes that 0)
     return {
-      x: Math.trunc(ln1a.x + t * dx1),
-      y: Math.trunc(ln1a.y + t * dy1),
+      x: roundToEven(ln1a.x + t * dx1) + 0,
+      y: roundToEven(ln1a.y + t * dy1) + 0,
       z: 0
     };
   }
@@ -478,6 +493,8 @@ function getLineIntersectPtD(
   return { success: true, ip };
 }
 
+// TS: the side tests are exact, where C++ takes cross products in doubles. They agree
+// below about 1e9.
 function segsIntersect(
   seg1a: Point64, seg1b: Point64, 
   seg2a: Point64, seg2b: Point64, 
@@ -522,10 +539,12 @@ function icGetBounds(path: Path64): Rect64 {
     if (pt.y > result.bottom) result.bottom = pt.y;
   }
   
+  // TS: an empty path has zero bounds, as in C#; C++ returns its invalid rect
   return result.left === Number.MAX_SAFE_INTEGER ? 
     { left: 0, top: 0, right: 0, bottom: 0 } : result;
 }
 
+// TS: the projection carries its rounding error, as getLineIntersectPt does
 function getClosestPtOnSegment(offPt: Point64, seg1: Point64, seg2: Point64): Point64 {
   if (seg1.x === seg2.x && seg1.y === seg2.y) return { x: seg1.x, y: seg1.y, z: 0 };  // Return copy, not reference
   
@@ -536,9 +555,9 @@ function getClosestPtOnSegment(offPt: Point64, seg1: Point64, seg2: Point64): Po
   const qClamped = q < 0 ? 0 : (q > 1 ? 1 : q);
   
   return {
-    // use Math.round to match the C# MidpointRounding.ToEven behavior
-    x: Math.round(seg1.x + qClamped * dx),
-    y: Math.round(seg1.y + qClamped * dy),
+    // the offset is rounded half to even and then added, as in C++
+    x: seg1.x + roundToEven(qClamped * dx),
+    y: seg1.y + roundToEven(qClamped * dy),
     z: 0
   };
 }
@@ -612,6 +631,101 @@ function icPointInPolygon(pt: Point64, polygon: Path64): PointInPolygonResult {
   return val === 0 ? PointInPolygonResult.IsOutside : PointInPolygonResult.IsInside;
 }
 
+// Coordinates up to this size, taken relative to an origin, can be doubled and
+// summed in pairs without rounding.
+// (the largest value formed is a doubled sum less a doubled coordinate of the other sign,
+// four times this size)
+const maxMidpointSpan = maxSafeInteger / 4;
+
+// icPointInPolygon for a point given in doubled coordinates (px, py) against a
+// polygon that is not doubled, so the midpoint of an integer segment can be
+// tested without rounding. It follows icPointInPolygon line for line with the
+// polygon's coordinates doubled as they are read; keep the two in step.
+// The polygon is read relative to the origin (ox, oy), which (px, py) is already
+// relative to, so only the distances from the origin have to be small.
+function pointInPolygon2x(
+  px: number, py: number, polygon: Path64, ox: number = 0, oy: number = 0
+): PointInPolygonResult {
+  const len = polygon.length;
+  let start = 0;
+  if (len < 3) return PointInPolygonResult.IsOutside;
+
+  while (start < len && (polygon[start].y - oy) * 2 === py) start++;
+  if (start === len) return PointInPolygonResult.IsOutside;
+
+  let isAbove = (polygon[start].y - oy) * 2 < py;
+  const startingAbove = isAbove;
+  let val = 0;
+  let i = start + 1;
+  let end = len;
+
+  while (true) {
+    if (i === end) {
+      if (end === 0 || start === 0) break;
+      end = start;
+      i = 0;
+    }
+
+    if (isAbove) {
+      while (i < end && (polygon[i].y - oy) * 2 < py) i++;
+    } else {
+      while (i < end && (polygon[i].y - oy) * 2 > py) i++;
+    }
+
+    if (i === end) continue;
+
+    const curr = polygon[i];
+    const prev = i > 0 ? polygon[i - 1] : polygon[len - 1];
+    const currX = (curr.x - ox) * 2, currY = (curr.y - oy) * 2;
+    const prevX = (prev.x - ox) * 2;
+
+    if (currY === py) {
+      if (currX === px || (curr.y === prev.y &&
+        ((px < prevX) !== (px < currX)))) {
+        return PointInPolygonResult.IsOn;
+      }
+      i++;
+      if (i === start) break;
+      continue;
+    }
+
+    if (px < currX && px < prevX) {
+      // we're only interested in edges crossing on the left
+    } else if (px > prevX && px > currX) {
+      val = 1 - val; // toggle val
+    } else {
+      const cps = crossProductSign2x(prev, curr, px, py, ox, oy);
+      if (cps === 0) return PointInPolygonResult.IsOn;
+      if ((cps < 0) === isAbove) val = 1 - val;
+    }
+    isAbove = !isAbove;
+    i++;
+  }
+
+  if (isAbove === startingAbove) {
+    return val === 0 ? PointInPolygonResult.IsOutside : PointInPolygonResult.IsInside;
+  }
+
+  if (i === len) i = 0;
+  const cps = i === 0 ?
+    crossProductSign2x(polygon[len - 1], polygon[0], px, py, ox, oy) :
+    crossProductSign2x(polygon[i - 1], polygon[i], px, py, ox, oy);
+  if (cps === 0) return PointInPolygonResult.IsOn;
+  if ((cps < 0) === isAbove) val = 1 - val;
+  return val === 0 ? PointInPolygonResult.IsOutside : PointInPolygonResult.IsInside;
+}
+
+// Sign of the cross product of (pt2 - pt1) and ((px, py) - 2 * (pt2 - origin)),
+// which is the sign crossProductSign gives for pt1 and pt2 taken relative to
+// the origin and doubled. Passing (px, py) - (pt2 - origin) as the third point
+// makes crossProductSign form those vectors.
+function crossProductSign2x(
+  pt1: Point64, pt2: Point64, px: number, py: number, ox: number, oy: number
+): number {
+  const x2 = pt2.x - ox, y2 = pt2.y - oy;
+  return crossProductSign({ x: pt1.x - ox, y: pt1.y - oy }, { x: x2, y: y2 }, { x: px - x2, y: py - y2 });
+}
+
 function path2ContainsPath1(path1: Path64, path2: Path64): boolean {
   // we need to make some accommodation for rounding errors
   // so we won't jump if the first vertex is found outside
@@ -630,19 +744,121 @@ function path2ContainsPath1(path1: Path64, path2: Path64): boolean {
         break;
     }
   }
-  // since path1's location is still equivocal, check its midpoint
+  // Undecided: every vertex is on path2, or the vertices off it don't agree.
+  // Upstream differs here. C++ returns false unless a vertex was inside, which
+  // leaves a hole that touches its owner at every vertex un-nested. C# accepts
+  // a bounds midpoint that is inside or on path2, which nests rings that only
+  // share an edge with path2 (upstream #957). The midpoints of path1's edges
+  // settle both cases, so they are tested before the bounds midpoint.
+  // They are taken relative to path1's corner, so that only the size of the two
+  // paths limits the test and not their distance from zero.
   const mp = icGetBounds(path1);
+  const b2 = icGetBounds(path2);
+  const ox = mp.left, oy = mp.top;
+  if (Number.isSafeInteger(ox) && Number.isSafeInteger(oy) &&
+      Number.isSafeInteger(mp.right) && Number.isSafeInteger(mp.bottom) &&
+      Number.isSafeInteger(b2.left) && Number.isSafeInteger(b2.right) &&
+      Number.isSafeInteger(b2.top) && Number.isSafeInteger(b2.bottom) &&
+      mp.right - ox <= maxMidpointSpan && mp.bottom - oy <= maxMidpointSpan &&
+      Math.abs(b2.left - ox) <= maxMidpointSpan && Math.abs(b2.right - ox) <= maxMidpointSpan &&
+      Math.abs(b2.top - oy) <= maxMidpointSpan && Math.abs(b2.bottom - oy) <= maxMidpointSpan) {
+    const needTwo = pip !== PointInPolygonResult.IsOn;
+    let mid = PointInPolygonResult.IsOn;
+    for (let i = 0, j = path1.length - 1; i < path1.length; j = i++) {
+      const r = pointInPolygon2x(
+        (path1[j].x - ox) + (path1[i].x - ox), (path1[j].y - oy) + (path1[i].y - oy), path2, ox, oy);
+      if (r === PointInPolygonResult.IsOn) continue;
+      // with every vertex on path2, one midpoint off it decides;
+      // otherwise two that agree, as in the vertex loop
+      if (!needTwo || r === mid) return r === PointInPolygonResult.IsInside;
+      mid = r;
+    }
+    // the last vertex off path2 stands unless a lone midpoint contradicts it
+    if (needTwo && (mid === PointInPolygonResult.IsOn || mid === pip)) {
+      return pip === PointInPolygonResult.IsInside;
+    }
+  }
+  // still undecided, or the paths are too large for that, so check the bounds midpoint
+  // (taken by integer division, which truncates toward zero, as in C++)
   let midX: number, midY: number;
   if (Number.isSafeInteger(mp.left) && Number.isSafeInteger(mp.right) &&
       Math.abs(mp.left) + Math.abs(mp.right) > Number.MAX_SAFE_INTEGER) {
     midX = Number((BigInt(mp.left) + BigInt(mp.right)) / B2);
     midY = Number((BigInt(mp.top) + BigInt(mp.bottom)) / B2);
   } else {
-    midX = Math.round((mp.left + mp.right) / 2);
-    midY = Math.round((mp.top + mp.bottom) / 2);
+    midX = Math.trunc((mp.left + mp.right) / 2);
+    midY = Math.trunc((mp.top + mp.bottom) / 2);
   }
   const midPt: Point64 = { x: midX, y: midY };
   return icPointInPolygon(midPt, path2) !== PointInPolygonResult.IsOutside;
+}
+
+// Shared by the public helpers in Clipper.ts and by the offsetter, the engine and
+// Minkowski, so that none of them has to import another for it.
+
+// drops repeated points, and for a closed path the closing points equal to the first.
+// A single point is kept, as in C++.
+export function stripDuplicates64(path: Path64, isClosedPath: boolean): Path64 {
+  const cnt = path.length;
+  const result: Path64 = [];
+  if (cnt === 0) return result;
+
+  let lastPt = path[0];
+  result.push(lastPt);
+  for (let i = 1; i < cnt; i++) {
+    const pt = path[i];
+    if (lastPt.x !== pt.x || lastPt.y !== pt.y) {
+      lastPt = pt;
+      result.push(lastPt);
+    }
+  }
+  while (isClosedPath && result.length > 1 &&
+    result[result.length - 1].x === result[0].x && result[result.length - 1].y === result[0].y) {
+    result.pop();
+  }
+  return result;
+}
+
+export function ellipse64(center: Point64, radiusX: number, radiusY: number = 0, steps: number = 0): Path64 {
+  if (radiusX <= 0) return [];
+  if (radiusY <= 0) radiusY = radiusX;
+  if (steps <= 2) {
+    steps = Math.trunc(Math.PI * Math.sqrt((radiusX + radiusY) / 2)); // truncated, as in C++
+    if (steps < 3) steps = 3; // TS: C++ has no minimum
+  }
+
+  const si = Math.sin(2 * Math.PI / steps);
+  const co = Math.cos(2 * Math.PI / steps);
+  let dx = co;
+  let dy = si;
+  const result: Path64 = [{ x: roundAwayFromZero(center.x + radiusX), y: center.y }];
+
+  for (let i = 1; i < steps; ++i) {
+    result.push({
+      x: roundAwayFromZero(center.x + radiusX * dx),
+      y: roundAwayFromZero(center.y + radiusY * dy)
+    });
+    const x = dx * co - dy * si;
+    dy = dy * co + dx * si;
+    dx = x;
+  }
+  return result;
+}
+
+// scales a path to integers, rounding half away from zero as std::round does in C++,
+// and throws for a coordinate that would pass the safe integer range
+export function scalePathDTo64(path: PathD, scale: number, context: string = "scalePath64"): Path64 {
+  const maxAbs = maxSafeCoordinateForScale(scale);
+  const result: Path64 = [];
+  for (const pt of path) {
+    checkSafeScaleValue(pt.x, maxAbs, context);
+    checkSafeScaleValue(pt.y, maxAbs, context);
+    result.push({
+      x: roundAwayFromZero(pt.x * scale),
+      y: roundAwayFromZero(pt.y * scale)
+    });
+  }
+  return result;
 }
 
 // Plain const object replaces the namespace. External callers use InternalClipper.foo()
@@ -660,6 +876,7 @@ export const InternalClipper = {
   maxSafeCoordinateForScale,
   checkSafeScaleValue,
   ensureSafeInteger,
+  productError,
   crossProduct,
   crossProductSign,
   checkPrecision,
@@ -674,6 +891,7 @@ export const InternalClipper = {
   crossProductD,
   dotProductD,
   roundToEven,
+  roundAwayFromZero,
   checkCastInt64,
   getLineIntersectPt,
   getLineIntersectPtD,
@@ -681,6 +899,7 @@ export const InternalClipper = {
   getBounds: icGetBounds,
   getClosestPtOnSegment,
   pointInPolygon: icPointInPolygon,
+  pointInPolygon2x,
   path2ContainsPath1,
 }
 
@@ -694,19 +913,19 @@ export namespace InternalClipper {
 // Point64 utility functions (plain object, avoids namespace IIFE)
 export const Point64Utils = {
   create(x: number = 0, y: number = 0, z: number = 0): Point64 {
-    return { x: Math.round(x), y: Math.round(y), z };
+    return { x: roundAwayFromZero(x), y: roundAwayFromZero(y), z };
   },
 
   fromPointD(pt: PointD): Point64 {
     InternalClipper.ensureSafeInteger(pt.x, "Point64Utils.fromPointD");
     InternalClipper.ensureSafeInteger(pt.y, "Point64Utils.fromPointD");
-    return { x: Math.round(pt.x), y: Math.round(pt.y), z: pt.z || 0 };
+    return { x: roundAwayFromZero(pt.x), y: roundAwayFromZero(pt.y), z: pt.z || 0 };
   },
 
   scale(pt: Point64, scale: number): Point64 {
     return {
-      x: Math.round(pt.x * scale),
-      y: Math.round(pt.y * scale),
+      x: roundAwayFromZero(pt.x * scale),
+      y: roundAwayFromZero(pt.y * scale),
       z: pt.z || 0
     };
   },
@@ -814,9 +1033,11 @@ export const Rect64Utils = {
       const midY = Number((BigInt(rect.top) + BigInt(rect.bottom)) / B2);
       return { x: midX, y: midY };
     }
+    // integer division, as in C++ (and as the BigInt branch above does)
+    // (adding 0 turns the -0 that truncating gives between -1 and 0 into 0)
     return {
-      x: Math.round((rect.left + rect.right) / 2),
-      y: Math.round((rect.top + rect.bottom) / 2)
+      x: Math.trunc((rect.left + rect.right) / 2) + 0,
+      y: Math.trunc((rect.top + rect.bottom) / 2) + 0
     };
   },
 

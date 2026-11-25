@@ -79,11 +79,116 @@ describe('PolyTree Hierarchical Structure Tests', () => {
     return true;
   }
 
+  // The six tests below are ported from PolyClipping/Clipper2 CPP/Tests/TestPolytreeHoles.cpp
+  const runTree = (ct: ClipType, fr: FillRule, subject: Paths64, clip: Paths64 = []): PolyTree64 => {
+    const c = new Clipper64();
+    c.addSubject(subject);
+    c.addClip(clip);
+    const tree = new PolyTree64();
+    c.execute(ct, fr, tree);
+    return tree;
+  };
+
+  test('TestPolytreeHoles1', () => {
+    const testCase = TestDataParser.loadTestCase('PolytreeHoleOwner.txt', 1);
+    expect(testCase).not.toBeNull();
+    const c = new Clipper64();
+    c.addSubject(testCase!.subjects);
+    c.addOpenSubject(testCase!.subjectsOpen);
+    c.addClip(testCase!.clips);
+    const solution = new PolyTree64();
+    c.execute(testCase!.clipType, testCase!.fillRule, solution, []);
+    expect(checkPolytreeFullyContainsChildren(solution)).toBe(true);
+  });
+
+  test('TestPolytreeHoles3', () => {
+    const subject = [Clipper.makePath([1072,501, 1072,501, 1072,539, 1072,539, 1072,539, 870,539,
+      870,539, 870,539, 870,520, 894,520, 898,524, 911,524, 915,520, 915,520, 936,520,
+      940,524, 953,524, 957,520, 957,520, 978,520, 983,524, 995,524, 1000,520, 1021,520,
+      1025,524, 1038,524, 1042,520, 1038,516, 1025,516, 1021,520, 1000,520, 995,516,
+      983,516, 978,520, 957,520, 953,516, 940,516, 936,520, 915,520, 911,516, 898,516,
+      894,520, 870,520, 870,516, 870,501, 870,501, 870,501, 1072,501])];
+    const clip = [Clipper.makePath([870,501, 971,501, 971,539, 870,539])];
+    const solution = runTree(ClipType.Intersection, FillRule.NonZero, subject, clip);
+    expect(solution.count).toBe(1);
+    expect(solution.child(0).count).toBe(2);
+  });
+
+  test('TestPolytreeHoles4 (#618)', () => {
+    const subject = [
+      Clipper.makePath([50,500, 50,300, 100,300, 100,350, 150,350,
+        150,250, 200,250, 200,450, 350,450, 350,200, 400,200, 400,225, 450,225,
+        450,175, 400,175, 400,200, 350,200, 350,175, 200,175, 200,250, 150,250,
+        150,200, 100,200, 100,300, 50,300, 50,125, 500,125, 500,500]),
+      Clipper.makePath([250,425, 250,375, 300,375, 300,425])
+    ];
+    // a polygon with 3 holes, one of which holds a nested polygon
+    const solution = runTree(ClipType.Union, FillRule.NonZero, subject);
+    expect(solution.count).toBe(1);
+    expect(solution.child(0).count).toBe(3);
+  });
+
+  test('TestPolytreeHoles5', () => {
+    const subject = [Clipper.makePath([0,30, 400,30, 400,100, 0,100])];
+    const clip = [
+      Clipper.makePath([20,30, 30,30, 30,150, 20,150]),
+      Clipper.makePath([200,0, 300,0, 300,30, 280,30, 280,20, 220,20, 220,30, 200,30]),
+      Clipper.makePath([200,50, 300,50, 300,80, 200,80])
+    ];
+    // 3 polygons, the last with 2 holes
+    const tree = runTree(ClipType.Xor, FillRule.NonZero, subject, clip);
+    expect(tree.count).toBe(3);
+    expect(tree.child(2).count).toBe(2);
+  });
+
+  test('TestPolytreeHoles6 (#618)', () => {
+    const subject = [
+      Clipper.makePath([150,50, 200,50, 200,100, 150,100]),
+      Clipper.makePath([125,100, 150,100, 150,150, 125,150]),
+      Clipper.makePath([225,50, 300,50, 300,80, 225,80]),
+      Clipper.makePath([225,100, 300,100, 300,150, 275,150, 275,175, 260,175,
+        260,250, 235,250, 235,300, 275,300, 275,275, 300,275, 300,350, 225,350]),
+      Clipper.makePath([300,150, 350,150, 350,175, 300,175])
+    ];
+    const clip = [
+      Clipper.makePath([0,0, 400,0, 400,50, 0,50]),
+      Clipper.makePath([0,100, 400,100, 400,150, 0,150]),
+      Clipper.makePath([260,175, 325,175, 325,275, 260,275])
+    ];
+    // 3 polygons, the last with 1 hole
+    const tree = runTree(ClipType.Xor, FillRule.NonZero, subject, clip);
+    expect(tree.count).toBe(3);
+    expect(tree.child(2).count).toBe(1);
+  });
+
+  test('TestPolytreeHoles7 (#618)', () => {
+    const subject = [
+      Clipper.makePath([0,0, 100000,0, 100000,100000, 200000,100000,
+        200000,0, 300000,0, 300000,200000, 0,200000]),
+      Clipper.makePath([0,0, 0,-100000, 250000,-100000, 250000,0])
+    ];
+    const polytree = runTree(ClipType.Union, FillRule.NonZero, subject);
+    expect(polytree.count).toBe(1);
+    expect(polytree.child(0).count).toBe(1);
+  });
+
   // PolyTree hole ownership test (TestPolytree2 equivalent)
   test('should correctly establish hole ownership relationships', () => {
     const testCase = TestDataParser.loadTestCase('PolytreeHoleOwner2.txt', 1);
     expect(testCase).not.toBeNull();
-    
+
+    // as upstream: the points outside are outside every subject, and the points
+    // inside are inside exactly one (which rules out subject holes)
+    const countSubjectsAt = (pt: Point64): number => testCase!.subjects.filter(
+      path => Clipper.pointInPolygon(pt, path) !== PointInPolygonResult.IsOutside).length;
+    for (const pt of [[21887, 10420], [21726, 10825], [21662, 10845], [21617, 10890]]) {
+      expect(countSubjectsAt({ x: pt[0], y: pt[1] })).toBe(0);
+    }
+    for (const pt of [[21887, 10430], [21843, 10520], [21810, 10686], [21900, 10461]]) {
+      expect(countSubjectsAt({ x: pt[0], y: pt[1] })).toBe(1);
+    }
+    expect(testCase!.fillRule).toBe(FillRule.Negative); // upstream passes Negative itself
+
     const clipper = new Clipper64();
     clipper.addSubject(testCase!.subjects);
     clipper.addOpenSubject(testCase!.subjectsOpen);
@@ -108,6 +213,12 @@ describe('PolyTree Hierarchical Structure Tests', () => {
     
     expect(area1).toBeGreaterThan(330000);
     expect(Math.abs(area1 - area2)).toBeLessThan(0.0001);
+    // as upstream: smaller than the subjects' area (negated for the fill rule), but not by much
+    const subjectArea = -Clipper.areaPaths(testCase!.subjects);
+    expect(solutionPaths.length).toBeGreaterThan(0);
+    expect(Clipper.areaPaths(solutionPaths)).toBeLessThan(subjectArea);
+    expect(Clipper.areaPaths(solutionPaths)).toBeGreaterThan(subjectArea * 0.92);
+    expect(Math.abs(solutionTree.area() - Clipper.areaPaths(solutionPaths))).toBeLessThan(0.0001);
     
     // Validate hierarchical containment
     expect(checkPolytreeFullyContainsChildren(solutionTree)).toBe(true);

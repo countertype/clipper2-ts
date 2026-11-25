@@ -9,7 +9,7 @@
 
 import {
   Path64, PathD, Paths64, PathsD, FillRule, ClipType, PathType,
-  Point64Utils, InternalClipper
+  Point64Utils, InternalClipper, scalePathDTo64
 } from './Core.js';
 import { Clipper64 } from './Engine.js';
 
@@ -67,17 +67,7 @@ function minkReversePath(path: Path64): Path64 {
 }
 
 function minkScalePath64(path: PathD, scale: number): Path64 {
-  const maxAbs = InternalClipper.maxSafeCoordinateForScale(scale);
-  const result: Path64 = [];
-  for (const pt of path) {
-      InternalClipper.checkSafeScaleValue(pt.x, maxAbs, "Minkowski.scalePath64");
-      InternalClipper.checkSafeScaleValue(pt.y, maxAbs, "Minkowski.scalePath64");
-      result.push({
-        x: InternalClipper.roundToEven(pt.x * scale),
-        y: InternalClipper.roundToEven(pt.y * scale)
-      });
-  }
-  return result;
+  return scalePathDTo64(path, scale, "Minkowski.scalePath64");
 }
 
 function minkScalePathsD(paths: Paths64, scale: number): PathsD {

@@ -1,12 +1,11 @@
 // Exercise the package.json exports map through Node's own loaders rather than
 // Vitest's source resolver. A package can reference itself by name when it has
-// an "exports" field, so no pack or install is needed. Requires a built dist/
-// (the prepare script builds it on npm install).
-import { execFileSync } from 'node:child_process';
+// an "exports" field, so no pack or install is needed. Requires a built dist/,
+// which is rebuilt from the current source before these tests run.
+import { execFileSync, execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, test } from 'vitest';
+import { beforeAll, describe, expect, test } from 'vitest';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const supportsRequireEsm = Boolean(process.features.require_module);
@@ -19,6 +18,22 @@ const checkIntersection = `
   ];
   const result = clipper.intersect([square(0, 0)], [square(5, 5)], clipper.FillRule.NonZero);
   assert.equal(Math.abs(clipper.areaPaths(result)), 25);
+`;
+
+// Use the built public entry points so declaration/build omissions cannot hide in source tests.
+const checkBoundary = `
+  const ring = [[0,0], [20,0], [40,0], [40,40], [0,40]].map(([x,y]) => ({x,y}));
+  const {result: boundaryResult, solution} = clipper.triangulate([ring], true, true);
+  assert.equal(boundaryResult, clipper.TriangulateResult.success);
+  assert.equal(solution.length, 3);
+  assert.equal(clipper.areaPaths(solution), 1600);
+  const key = (a,b) => [a.x + ',' + a.y, b.x + ',' + b.y].sort().join(':');
+  const edges = new Map();
+  for (const triangle of solution) for (let i=0; i<3; i++) {
+    const k=key(triangle[i], triangle[(i+1)%3]);
+    edges.set(k,(edges.get(k)||0)+1);
+  }
+  for (let i=0; i<ring.length; i++) assert.equal(edges.get(key(ring[i],ring[(i+1)%ring.length])),1);
 `;
 
 // Runs source with Node in the package root. On failure the child's stderr
@@ -37,6 +52,17 @@ function node(source: string, mode: 'module' | 'commonjs'): void {
 }
 
 describe('package exports', () => {
+  // Without this the tests below check whatever build was made last. Run through a shell
+  // so npm is found on Windows, and with the compiler's output kept for the error.
+  beforeAll(() => {
+    try {
+      execSync('npm run build', { cwd: root, stdio: 'pipe' });
+    } catch (err) {
+      const e = err as { stdout?: Buffer; stderr?: Buffer };
+      throw new Error(`npm run build failed:\n${e.stdout?.toString() ?? ''}${e.stderr?.toString() ?? ''}`, { cause: err });
+    }
+  }, 120_000);
+
   test('dist is built', () => {
     expect(existsSync(new URL('../dist/index.js', import.meta.url)),
       'dist/index.js is missing; run npm run build').toBe(true);
@@ -47,13 +73,19 @@ describe('package exports', () => {
       import assert from 'node:assert/strict';
       import * as clipper from 'clipper2-ts';
       ${checkIntersection}
+      ${checkBoundary}
     `, 'module');
   });
 
   test.skipIf(!supportsRequireEsm)('CommonJS require resolves through the exports map', () => {
-    const clipper = createRequire(import.meta.url)('clipper2-ts');
-    expect(typeof clipper.intersect).toBe('function');
-    expect(typeof clipper.Clipper64).toBe('function');
+    node(`
+      const assert = require('node:assert/strict');
+      const clipper = require('clipper2-ts');
+      assert.equal(typeof clipper.intersect, 'function');
+      assert.equal(typeof clipper.Clipper64, 'function');
+      ${checkIntersection}
+      ${checkBoundary}
+    `, 'commonjs');
   });
 
   test.skipIf(!supportsRequireEsm)('import and require share one module instance', () => {
@@ -65,6 +97,14 @@ describe('package exports', () => {
       assert.equal(required.intersect, imported.intersect);
       assert.equal(required.Clipper64, imported.Clipper64);
       assert.ok(new required.Clipper64() instanceof imported.Clipper64);
+    `, 'module');
+  });
+
+  test('boundary preservation survives the minified bundle', () => {
+    node(`
+      import assert from 'node:assert/strict';
+      import * as clipper from './dist/clipper2.min.mjs';
+      ${checkBoundary}
     `, 'module');
   });
 });

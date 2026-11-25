@@ -11,6 +11,34 @@
 import { Point64, Path64, Paths64 } from './Core.js';
 import { adaptiveOrient2dSign, adaptiveIncircleSign } from './Shewchuk.js';
 
+// Triangulation is deprecated: upstream has withdrawn its triangulation module
+// and it will be removed from this library in the next release (see issue #41).
+let deprecationWarned = false;
+
+function warnDeprecated(): void {
+  if (deprecationWarned) return;
+  deprecationWarned = true;
+  const message = 'clipper2-ts: triangulation is deprecated and will be removed in the next release. ' +
+    'See https://github.com/countertype/clipper2-ts/issues/41';
+  const proc = (globalThis as {
+    process?: {
+      emitWarning?: (warning: string, options: { type: string; code: string }) => void;
+      throwDeprecation?: boolean;
+    }
+  }).process;
+  // under --throw-deprecation the warning would be thrown where no caller can catch it
+  if (proc && typeof proc.emitWarning === 'function' && !proc.throwDeprecation) {
+    // in Node this can be silenced with --no-deprecation or traced with --trace-deprecation
+    proc.emitWarning(message, { type: 'DeprecationWarning', code: 'CLIPPER2TS_TRIANGULATION' });
+  } else if (typeof console !== 'undefined') {
+    console.warn(message);
+  }
+}
+
+// raised inside the triangulation when its edges and vertices stop agreeing; execute turns it into fail
+class TriangulationError extends Error {}
+
+/** @deprecated Triangulation will be removed in the next release. See https://github.com/countertype/clipper2-ts/issues/41 */
 export enum TriangulateResult {
   success,
   fail,
@@ -64,6 +92,7 @@ class Triangle {
 // Delaunay class declaration & implementation
 // -------------------------------------------------------------------------
 
+/** @deprecated Triangulation will be removed in the next release. See https://github.com/countertype/clipper2-ts/issues/41 */
 export class Delaunay {
   private readonly allVertices: Vertex2[] = [];
   private readonly allEdges: Edge[] = [];
@@ -72,14 +101,20 @@ export class Delaunay {
   private readonly horzEdgeStack: Edge[] = [];
   private readonly locMinStack: Vertex2[] = [];
   private readonly useDelaunay: boolean;
+  private readonly preserveCollinear: boolean;
   private firstActive: Edge | null = null;
   private lowermostVertex: Vertex2 | null = null;
   private fastMath: boolean = false;
   private readonly _edgesA: (Edge | null)[] = [null, null, null];
   private readonly _edgesB: (Edge | null)[] = [null, null, null];
 
-  constructor(delaunay: boolean = true) {
+  // delaunay: optimize interior edges using Delaunay legalization (default true).
+  // preserveCollinear: keep every boundary segment, or make execute return fail
+  // where one can't be kept (default false).
+  constructor(delaunay: boolean = true, preserveCollinear: boolean = false) {
+    warnDeprecated(); // once per process
     this.useDelaunay = delaunay;
+    this.preserveCollinear = preserveCollinear;
   }
 
   private updateFastMath(paths: Paths64): void {
@@ -122,16 +157,85 @@ export class Delaunay {
     this.fastMath = Math.max(maxDeltaX, maxDeltaY) <= Delaunay.maxSafeDelta;
   }
 
+  // TS: a path with a repeated point or a spike of no width is walked without them. C++
+  // walks it as given, and a spike beside a local minimum then hides the minimum, sets the
+  // orientation wrongly or keeps the walk from closing.
   private addPath(path: Path64): void {
+    let walked = path;
+    if (this.hasSpike(path)) {
+      walked = this.withoutSpikes(path);
+      if (walked.length < 3) return; // nothing but spikes, so no area to triangulate
+    }
+    // a path that could not be walked stays listed, so restoreBoundary reports it
+    this.tryAddPath(walked);
+    this.addedPaths.push(walked);
+  }
+
+  private static samePoint(a: Point64, b: Point64): boolean {
+    return a.x === b.x && a.y === b.y;
+  }
+
+  // b lies on the line through a and c, and the path reverses there. a, b and c differ.
+  private turnsBack(a: Point64, b: Point64, c: Point64): boolean {
+    return this.crossProductSign(a, b, c) === 0 &&
+      !(Math.sign(b.x - a.x) === Math.sign(c.x - b.x) && Math.sign(b.y - a.y) === Math.sign(c.y - b.y));
+  }
+
+  private hasSpike(path: Path64): boolean {
     const len = path.length;
-    if (len === 0) return;
+    if (len < 3) return false;
+    let prev = path[len - 2];
+    let cur = path[len - 1];
+    for (let i = 0; i < len; i++) {
+      const next = path[i];
+      if (Delaunay.samePoint(cur, next) || Delaunay.samePoint(prev, cur) ||
+        this.turnsBack(prev, cur, next)) return true;
+      prev = cur;
+      cur = next;
+    }
+    return false;
+  }
+
+  // the path with repeated points and spikes of no width taken out, in one pass; vertices
+  // on a straight run are kept. Empty when fewer than three points are left.
+  private withoutSpikes(path: Path64): Path64 {
+    const out: Path64 = [];
+    for (const p of path) {
+      for (; ;) {
+        const n = out.length;
+        if (n >= 1 && Delaunay.samePoint(out[n - 1], p)) break;
+        if (n >= 2 && this.turnsBack(out[n - 2], out[n - 1], p)) { out.pop(); continue; }
+        out.push(p);
+        break;
+      }
+    }
+    // the same two tests across the join of the last point and the first
+    let head = 0;
+    for (; ;) {
+      const n = out.length;
+      if (n - head < 3) return [];
+      if (Delaunay.samePoint(out[n - 1], out[head]) ||
+        this.turnsBack(out[n - 2], out[n - 1], out[head])) out.pop();
+      else if (this.turnsBack(out[n - 1], out[head], out[head + 1])) head++;
+      else break;
+    }
+    return head === 0 ? out : out.slice(head);
+  }
+
+  // the paths as walked, which is what restoreBoundary has to find in the result
+  private addedPaths: Paths64 = [];
+
+  // false when the path could not be walked, with nothing of it left behind
+  private tryAddPath(path: Path64): boolean {
+    const len = path.length;
+    if (len === 0) return true;
 
     let i0 = 0;
     let iPrev: number;
     let iNext: number;
 
     i0 = Delaunay.findLocMinIdx(path, len, i0);
-    if (i0 < 0) return;
+    if (i0 < 0) return true;
 
     iPrev = Delaunay.prev(i0, len);
     while (path[iPrev].x === path[i0].x && path[iPrev].y === path[i0].y)
@@ -142,7 +246,8 @@ export class Delaunay {
     let i = i0;
     while (this.crossProductSign(path[iPrev], path[i], path[iNext]) === 0) {
       i = Delaunay.findLocMinIdx(path, len, i);
-      if (i < 0) return;
+      if (i < 0) return true;
+      if (i === i0) return false; // entirely collinear, or its only local minimum is a spike
       iPrev = Delaunay.prev(i, len);
       while (path[iPrev].x === path[i].x && path[iPrev].y === path[i].y)
         iPrev = Delaunay.prev(iPrev, len);
@@ -150,6 +255,20 @@ export class Delaunay {
     }
 
     const vert_cnt = this.allVertices.length;
+    const edge_cnt = this.allEdges.length;
+    const locMin_cnt = this.locMinStack.length;
+    const lowermost = this.lowermostVertex;
+    // every step below moves on one vertex, and a walk that has gone round the path twice
+    // without closing never will
+    let steps = 0;
+    const maxSteps = 2 * len + 2;
+    const giveUp = (): boolean => {
+      this.allVertices.length = vert_cnt;
+      this.allEdges.length = edge_cnt;
+      this.locMinStack.length = locMin_cnt;
+      this.lowermostVertex = lowermost;
+      return false;
+    };
     const v0 = new Vertex2(path[i]);
     this.allVertices.push(v0);
 
@@ -162,6 +281,7 @@ export class Delaunay {
     for (; ;) {
       iNext = Delaunay.next(i, len);
       if (this.crossProductSign(vPrev.pt, path[i], path[iNext]) === 0) {
+        if (++steps > maxSteps) return giveUp();
         i = iNext;
         continue;
       }
@@ -180,26 +300,31 @@ export class Delaunay {
         this.allVertices.push(v);
         this.createEdge(vPrev, v, EdgeKind.ascend);
         vPrev = v;
+        if (++steps > maxSteps) return giveUp();
         i = iNext;
         iNext = Delaunay.next(i, len);
 
         while (this.crossProductSign(vPrev.pt, path[i], path[iNext]) === 0) {
+          if (++steps > maxSteps) return giveUp();
           i = iNext;
           iNext = Delaunay.next(i, len);
         }
       }
 
       // Now at a locMax, so descend to next locMin
-      const vPrevPrev = vPrev;
+      let vPrevPrev = vPrev;
       while (i !== i0 && path[i].y >= vPrev.pt.y) {
         const v = new Vertex2(path[i]);
         this.allVertices.push(v);
         this.createEdge(v, vPrev, EdgeKind.descend);
+        vPrevPrev = vPrev;
         vPrev = v;
+        if (++steps > maxSteps) return giveUp();
         i = iNext;
         iNext = Delaunay.next(i, len);
 
         while (this.crossProductSign(vPrev.pt, path[i], path[iNext]) === 0) {
+          if (++steps > maxSteps) return giveUp();
           i = iNext;
           iNext = Delaunay.next(i, len);
         }
@@ -223,6 +348,7 @@ export class Delaunay {
       for (let j = vert_cnt; j < this.allVertices.length; ++j)
         this.allVertices[j].edges = []; // flag to ignore
     }
+    return true;
   }
 
   private addPaths(paths: Paths64): boolean {
@@ -231,6 +357,7 @@ export class Delaunay {
       totalVertexCount += path.length;
     if (totalVertexCount === 0) return false;
 
+    this.addedPaths = [];
     for (const path of paths)
       this.addPath(path);
 
@@ -365,7 +492,7 @@ export class Delaunay {
     return true;
   }
 
-  private createEdge(v1: Vertex2, v2: Vertex2, k: EdgeKind): Edge {
+  private createEdge(v1: Vertex2, v2: Vertex2, k: EdgeKind, sweeping: boolean = true): Edge {
     const res = new Edge();
     this.allEdges.push(res);
 
@@ -394,32 +521,138 @@ export class Delaunay {
 
     if (k === EdgeKind.loose) {
       this.queuePendingDelaunay(res);
-      this.addEdgeToActives(res);
+      if (sweeping) this.addEdgeToActives(res);
     }
 
     return res;
   }
 
-  private createTriangle(e1: Edge, e2: Edge, e3: Edge): Triangle {
+  private createTriangle(e1: Edge, e2: Edge, e3: Edge, sweeping: boolean = true): Triangle {
     const tri = new Triangle(e1, e2, e3);
     this.allTriangles.push(tri);
 
+    this.attachTriangle(tri, sweeping);
+    return tri;
+  }
+
+  private attachTriangle(tri: Triangle, sweeping: boolean): void {
     for (let i = 0; i < 3; ++i) {
       const e = tri.edges[i];
       if (e.triA !== null) {
         e.triB = tri;
-        this.removeEdgeFromActives(e);
+        if (sweeping) this.removeEdgeFromActives(e);
       } else {
         e.triA = tri;
-        if (!Delaunay.isLooseEdge(e))
+        if (sweeping && !Delaunay.isLooseEdge(e))
           this.removeEdgeFromActives(e);
       }
     }
-
-    return tri;
   }
 
-  private forceLegal(edge: Edge): void {
+  // Restore skipped boundary subdivisions before legalizing the new interior edges.
+  private restoreBoundary(paths: Paths64): boolean {
+    const pointKey = (p: Point64): string => `${p.x},${p.y}`;
+    const edgeKey = (a: Point64, b: Point64): string =>
+      a.x < b.x || (a.x === b.x && a.y < b.y)
+        ? `${pointKey(a)}:${pointKey(b)}` : `${pointKey(b)}:${pointKey(a)}`;
+    const boundary = new Map<string, Edge>();
+    const vertices = new Set<string>();
+    for (const edge of this.allEdges) {
+      if (edge.kind === EdgeKind.loose || edge.triA === null || edge.triB !== null) continue;
+      const key = edgeKey(edge.vL.pt, edge.vR.pt);
+      if (boundary.has(key)) return false;
+      const triangle = Delaunay.pathFromTriangle(edge.triA);
+      if (this.crossProductSign(triangle[0], triangle[1], triangle[2]) === 0) return false;
+      boundary.set(key, edge);
+      vertices.add(pointKey(edge.vL.pt));
+      vertices.add(pointKey(edge.vR.pt));
+    }
+
+    const expected = new Set<string>();
+    for (const path of paths) {
+      // Consecutive duplicates and an explicit closing point do not define constraints.
+      const ring = path.filter((p, i) => i === 0 || pointKey(p) !== pointKey(path[i - 1]));
+      if (ring.length > 1 && pointKey(ring[0]) === pointKey(ring[ring.length - 1])) ring.pop();
+      if (ring.length < 3) continue;
+      for (let i = 0; i < ring.length; i++) {
+        const key = edgeKey(ring[i], ring[(i + 1) % ring.length]);
+        if (expected.has(key)) return false;
+        expected.add(key);
+      }
+      const start = ring.findIndex(p => vertices.has(pointKey(p)));
+      if (start < 0) return false;
+      let previous = ring[start];
+      let pending: Point64[] = [];
+      for (let offset = 1; offset <= ring.length; offset++) {
+        const point = ring[(start + offset) % ring.length];
+        if (!vertices.has(pointKey(point))) {
+          pending.push(point);
+          continue;
+        }
+        let edge = boundary.get(edgeKey(previous, point));
+        if (edge === undefined) return false;
+        for (const split of pending) {
+          // Exact predicates and strict containment: never snap a near-boundary point.
+          if (this.crossProductSign(previous, split, point) !== 0 ||
+            split.x < Math.min(previous.x, point.x) || split.x > Math.max(previous.x, point.x) ||
+            split.y < Math.min(previous.y, point.y) || split.y > Math.max(previous.y, point.y) ||
+            pointKey(split) === pointKey(previous) || pointKey(split) === pointKey(point)) return false;
+          boundary.delete(edgeKey(previous, point));
+          const [first, second] = this.splitBoundaryEdge(edge, split);
+          boundary.set(edgeKey(first.vL.pt, first.vR.pt), first);
+          boundary.set(edgeKey(second.vL.pt, second.vR.pt), second);
+          vertices.add(pointKey(split));
+          previous = split;
+          edge = boundary.get(edgeKey(previous, point))!;
+        }
+        previous = point;
+        pending = [];
+      }
+    }
+    // Reject adjusted, discarded or overlapping constraints rather than return a nonconforming cap.
+    return boundary.size === expected.size && [...expected].every(key => boundary.has(key));
+  }
+
+  private splitBoundaryEdge(edge: Edge, point: Point64): [Edge, Edge] {
+    const triangle = edge.triA!;
+    const a = edge.vL;
+    const b = edge.vR;
+    const sides = triangle.edges.filter(e => e !== edge);
+    const sideA = sides.find(e => Delaunay.edgeContains(e, a) !== EdgeContainsResult.neither)!;
+    const sideB = sides.find(e => e !== sideA)!;
+    const opposite = sideA.vL === a ? sideA.vR : sideA.vL;
+    const vertex = new Vertex2(point);
+    this.allVertices.push(vertex);
+
+    for (const e of triangle.edges) {
+      if (e.triA === triangle) {
+        e.triA = e.triB;
+        e.triB = null;
+      } else e.triB = null;
+      if (e.kind === EdgeKind.loose) this.queuePendingDelaunay(e);
+    }
+    // The detached long edge intentionally remains in allEdges until cleanUp,
+    // with both triangle links cleared above. The sweep has already consumed
+    // vertex adjacency, so do not remove it from the endpoint edge lists.
+    const first = this.createEdge(a, vertex, edge.kind, false);
+    const second = this.createEdge(vertex, b, edge.kind, false);
+    const diagonal = this.createEdge(vertex, opposite, EdgeKind.loose, false);
+    triangle.edges = [first, diagonal, sideA];
+    this.attachTriangle(triangle, false);
+    this.createTriangle(second, sideB, diagonal, false);
+    return [first, second];
+  }
+
+  private legalize(): void {
+    // Repair collinear sweep triangles even when Delaunay optimization is disabled.
+    while (this.pendingDelaunayStack.length > 0) {
+      const edge = this.pendingDelaunayStack.pop()!;
+      edge.pendingDelaunay = false;
+      this.forceLegal(edge, this.useDelaunay);
+    }
+  }
+
+  private forceLegal(edge: Edge, delaunay: boolean): void {
     if (edge.triA === null || edge.triB === null) return;
 
     let vertA: Vertex2 | null = null;
@@ -463,17 +696,21 @@ export class Delaunay {
     if (vertA === null || vertB === null) return;
 
     const cpsA = this.crossProductSign(vertA.pt, edge.vL.pt, edge.vR.pt);
-    if (cpsA === 0)
-      return;
-
     const cpsB = this.crossProductSign(vertB.pt, edge.vL.pt, edge.vR.pt);
-    if (cpsB === 0 || cpsA === cpsB)
-      return;
-
-    const ictResult = this.inCircleTest(vertA.pt, edge.vL.pt, edge.vR.pt, vertB.pt);
-    if (ictResult === 0 ||
-      (this.rightTurning(vertA.pt, edge.vL.pt, edge.vR.pt) === (ictResult < 0)))
-      return;
+    if (cpsA === 0 || cpsB === 0) {
+      // A zero-area sweep triangle can encode a vertex inside its neighbor's edge.
+      // Rotate that long edge to split the neighbor instead of dropping the constraint.
+      if (cpsA === 0 && cpsB === 0) return;
+      const point = cpsA === 0 ? vertA.pt : vertB.pt;
+      const a = edge.vL.pt, b = edge.vR.pt;
+      if ((point.x === a.x && point.y === a.y) || (point.x === b.x && point.y === b.y) ||
+        point.x < Math.min(a.x, b.x) || point.x > Math.max(a.x, b.x) ||
+        point.y < Math.min(a.y, b.y) || point.y > Math.max(a.y, b.y)) return;
+    } else {
+      if (!delaunay || cpsA === cpsB) return;
+      const ictResult = this.inCircleTest(vertA.pt, edge.vL.pt, edge.vR.pt, vertB.pt);
+      if (ictResult === 0 || ((cpsA > 0) === (ictResult < 0))) return;
+    }
 
     edge.vL = vertA;
     edge.vR = vertB;
@@ -492,7 +729,7 @@ export class Delaunay {
       else if (eAi.triB === edge.triB)
         eAi.triB = edge.triA;
       else
-        throw new Error('Triangulation internal error');
+        throw new TriangulationError('Triangulation internal error');
     }
 
     edge.triB!.edges[0] = edge;
@@ -509,7 +746,7 @@ export class Delaunay {
       else if (eBi.triB === edge.triA)
         eBi.triB = edge.triB;
       else
-        throw new Error('Triangulation internal error');
+        throw new TriangulationError('Triangulation internal error');
     }
   }
 
@@ -543,8 +780,12 @@ export class Delaunay {
     // Iterate until no blocking edge is found for the current bridge vBest->vAbove.
     // We must restart the search whenever vBest changes because edges checked earlier
     // might now intersect the new bridge.
+    // nb: each restart moves the bridge to another vertex, so more restarts than
+    // vertices means edges that block each other, and no bridge exists
+    let restarts = this.allVertices.length;
     let changed = true;
     while (changed) {
+      if (restarts-- < 0) return null;
       changed = false;
       e = this.firstActive;
       while (e !== null) {
@@ -559,13 +800,52 @@ export class Delaunay {
         }
         e = e.nextE;
       }
+      if (changed) continue;
+
+      // A vertex lying exactly on the bridge also blocks it. End the bridge at
+      // the blocking vertex nearest vAbove instead of running an edge through
+      // it (PolyClipping/Clipper2 #12). Horizontal bridges are left alone:
+      // collinear vertices on a horizontal are handled by the horizontal pass.
+      let nearest: Vertex2 | null = null;
+      let nearestD = 0;
+      e = this.firstActive;
+      while (e !== null) {
+        const vOn = this.vertexOnSegment(e, vBest, vAbove);
+        if (vOn !== null) {
+          const d = this.distanceSqr(vOn.pt, vAbove.pt);
+          if (nearest === null || d < nearestD) { nearest = vOn; nearestD = d; }
+        }
+        e = e.nextE;
+      }
+      if (nearest !== null && nearest.pt.y !== yAbove) {
+        vBest = nearest;
+        changed = true;
+      }
     }
 
     return this.createEdge(vBest, vAbove, EdgeKind.loose);
   }
 
+  // Returns an endpoint of e that lies strictly inside the segment a-b, or null.
+  private vertexOnSegment(e: Edge, a: Vertex2, b: Vertex2): Vertex2 | null {
+    if (this.isInsideSegment(e.vB, a, b)) return e.vB;
+    if (this.isInsideSegment(e.vT, a, b)) return e.vT;
+    return null;
+  }
 
-  private doTriangulateLeft(edge: Edge, pivot: Vertex2, minY: number, limitFan = false): void {
+  private isInsideSegment(w: Vertex2, a: Vertex2, b: Vertex2): boolean {
+    if (w === a || w === b) return false;
+    const p = w.pt, pa = a.pt, pb = b.pt;
+    // inside the bounding range of the segment on its non-degenerate axis, and collinear
+    if (pa.x !== pb.x) {
+      if ((p.x > pa.x) !== (p.x < pb.x) || p.x === pa.x || p.x === pb.x) return false;
+    } else if ((p.y > pa.y) !== (p.y < pb.y) || p.y === pa.y || p.y === pb.y) {
+      return false;
+    }
+    return this.crossProductSign(pa, pb, p) === 0;
+  }
+
+  private doTriangulateLeft(edge: Edge, pivot: Vertex2, minY: number): void {
     let vAlt: Vertex2 | null = null;
     let eAlt: Edge | null = null;
 
@@ -589,13 +869,6 @@ export class Delaunay {
 
     if (vAlt === null || vAlt.pt.y < minY || eAlt === null) return;
 
-    // Domiter & Zalik 2008, §3.2: stop fan extension when angle at pivot > pi/2
-    if (limitFan) {
-      const dvx = v.pt.x - pivot.pt.x, dvy = v.pt.y - pivot.pt.y;
-      const dax = vAlt.pt.x - pivot.pt.x, day = vAlt.pt.y - pivot.pt.y;
-      if (dvx * dax + dvy * day < 0) return;
-    }
-
     if (vAlt.pt.y < pivot.pt.y) {
       if (Delaunay.isLeftEdge(eAlt)) return;
     } else if (vAlt.pt.y > pivot.pt.y) {
@@ -610,10 +883,10 @@ export class Delaunay {
     this.createTriangle(edge, eAlt, eX);
 
     if (!Delaunay.edgeCompleted(eX))
-      this.doTriangulateLeft(eX, vAlt, minY, true);
+      this.doTriangulateLeft(eX, vAlt, minY);
   }
 
-  private doTriangulateRight(edge: Edge, pivot: Vertex2, minY: number, limitFan = false): void {
+  private doTriangulateRight(edge: Edge, pivot: Vertex2, minY: number): void {
     let vAlt: Vertex2 | null = null;
     let eAlt: Edge | null = null;
 
@@ -637,13 +910,6 @@ export class Delaunay {
 
     if (vAlt === null || vAlt.pt.y < minY || eAlt === null) return;
 
-    // Domiter & Zalik 2008, §3.2: stop fan extension when angle at pivot > pi/2
-    if (limitFan) {
-      const dvx = v.pt.x - pivot.pt.x, dvy = v.pt.y - pivot.pt.y;
-      const dax = vAlt.pt.x - pivot.pt.x, day = vAlt.pt.y - pivot.pt.y;
-      if (dvx * dax + dvy * day < 0) return;
-    }
-
     if (vAlt.pt.y < pivot.pt.y) {
       if (Delaunay.isRightEdge(eAlt)) return;
     } else if (vAlt.pt.y > pivot.pt.y) {
@@ -658,7 +924,7 @@ export class Delaunay {
     this.createTriangle(edge, eX, eAlt);
 
     if (!Delaunay.edgeCompleted(eX))
-      this.doTriangulateRight(eX, vAlt, minY, true);
+      this.doTriangulateRight(eX, vAlt, minY);
   }
 
   private addEdgeToActives(edge: Edge): void {
@@ -694,35 +960,43 @@ export class Delaunay {
     if (this.firstActive === edge) this.firstActive = next;
   }
 
+  // TS: an inconsistency met part way, on paths that touch or cross themselves, is returned
+  // as fail. C++ raises its error from there.
   execute(paths: Paths64): { result: TriangulateResult, solution: Paths64 } {
+    try {
+      return this.executeInternal(paths);
+    } catch (e) {
+      if (!(e instanceof TriangulationError)) throw e;
+      return { result: TriangulateResult.fail, solution: [] };
+    } finally {
+      this.cleanUp(); // whatever the exit, nothing of this call is left for the next
+    }
+  }
+
+  private executeInternal(paths: Paths64): { result: TriangulateResult, solution: Paths64 } {
     const sol: Paths64 = [];
 
     this.updateFastMath(paths);
 
     if (!this.addPaths(paths)) {
+      this.cleanUp();
       return { result: TriangulateResult.noPolygons, solution: sol };
     }
 
     // if necessary fix path orientation because the algorithm 
     // expects clockwise outer paths and counter-clockwise inner paths
     if (this.lowermostVertex!.innerLM) {
-      // the orientation of added paths must be wrong, so
-      // 1. reverse innerLM flags ...
-      while (this.locMinStack.length > 0) {
-        const lm = this.locMinStack.pop()!;
-        lm.innerLM = !lm.innerLM;
+      // the orientation of added paths must be wrong, so add them again reversed
+      this.cleanUp();
+      const reversed = paths.map(p => [...p].reverse());
+      if (!this.addPaths(reversed)) {
+        this.cleanUp();
+        return { result: TriangulateResult.noPolygons, solution: sol };
       }
-      // 2. swap edge kinds
-      for (const e of this.allEdges) {
-        if (e.kind === EdgeKind.ascend)
-          e.kind = EdgeKind.descend;
-        else if (e.kind === EdgeKind.descend)
-          e.kind = EdgeKind.ascend;
-      }
-    } else {
-      // path orientation is fine so ...
-      this.locMinStack.length = 0;
     }
+    // path orientation is fine so ...
+    this.locMinStack.length = 0;
+    const boundaryPaths = this.addedPaths;
 
     this.allEdges.sort((a, b) => {
       if (a.vL.pt.x < b.vL.pt.x) return -1;
@@ -824,12 +1098,13 @@ export class Delaunay {
         this.doTriangulateLeft(e, e.vB, currY);
     }
 
-    if (this.useDelaunay) {
-      while (this.pendingDelaunayStack.length > 0) {
-        const e = this.pendingDelaunayStack.pop()!;
-        e.pendingDelaunay = false;
-        this.forceLegal(e);
+    this.legalize();
+    if (this.preserveCollinear) {
+      if (!this.restoreBoundary(boundaryPaths)) {
+        this.cleanUp();
+        return { result: TriangulateResult.fail, solution: sol };
       }
+      this.legalize();
     }
 
     for (const tri of this.allTriangles) {
@@ -880,43 +1155,10 @@ export class Delaunay {
     return (cross * cross) / denom;
   }
 
+  // TS: always the exact orientation test. The parametric version in C++ misclassifies
+  // segments that touch at a vertex lying on the other segment.
   private segsIntersect(s1a: Point64, s1b: Point64, s2a: Point64, s2b: Point64): IntersectKind {
-    if (!this.fastMath)
-      return Delaunay.segsIntersect(s1a, s1b, s2a, s2b);
-
-    // ignore segments sharing an end-point
-    if ((s1a.x === s2a.x && s1a.y === s2a.y) ||
-        (s1a.x === s2b.x && s1a.y === s2b.y) ||
-        (s1b.x === s2b.x && s1b.y === s2b.y)) return IntersectKind.none;
-
-    const dy1 = s1b.y - s1a.y;
-    const dx1 = s1b.x - s1a.x;
-    const dy2 = s2b.y - s2a.y;
-    const dx2 = s2b.x - s2a.x;
-    const dxs = s1a.x - s2a.x;
-    const dys = s1a.y - s2a.y;
-
-    const cp = dy1 * dx2 - dy2 * dx1;
-    if (cp === 0) return IntersectKind.collinear;
-
-    let t = dxs * dy2 - dys * dx2;
-
-    // nb: testing for t === 0 is unreliable due to float imprecision
-    if (t >= 0) {
-      if (cp < 0 || t >= cp) return IntersectKind.none;
-    } else {
-      if (cp > 0 || t <= cp) return IntersectKind.none;
-    }
-
-    t = dxs * dy1 - dys * dx1;
-
-    if (t >= 0) {
-      if (cp > 0 && t < cp) return IntersectKind.intersect;
-    } else {
-      if (cp < 0 && t > cp) return IntersectKind.intersect;
-    }
-
-    return IntersectKind.none;
+    return Delaunay.segsIntersect(s1a, s1b, s2a, s2b);
   }
 
   private inCircleTest(ptA: Point64, ptB: Point64, ptC: Point64, ptD: Point64): number {
@@ -997,7 +1239,7 @@ export class Delaunay {
 
   private static removeEdgeFromVertex(vert: Vertex2, edge: Edge): void {
     const idx = vert.edges.indexOf(edge);
-    if (idx < 0) throw new Error('Edge not found in vertex');
+    if (idx < 0) throw new TriangulationError('Edge not found in vertex');
     // Swap-with-last-and-pop: O(1) instead of O(n) splice.
     // Edge order in the array doesn't matter.
     const last = vert.edges.length - 1;
@@ -1093,9 +1335,16 @@ export class Delaunay {
   }
 
   private static segsIntersect(s1a: Point64, s1b: Point64, s2a: Point64, s2b: Point64): IntersectKind {
+    // ignore segments sharing an end-point (same three pairings as C++)
     if ((s1a.x === s2a.x && s1a.y === s2a.y) ||
-        (s1a.x === s2b.x && s1a.y === s2b.y) ||
+        (s1b.x === s2a.x && s1b.y === s2a.y) ||
         (s1b.x === s2b.x && s1b.y === s2b.y)) return IntersectKind.none;
+
+    // TS: segments whose bounds are apart can't cross (nor is collinear reported for them)
+    if ((s1a.x < s1b.x ? s1b.x : s1a.x) < (s2a.x < s2b.x ? s2a.x : s2b.x) ||
+        (s2a.x < s2b.x ? s2b.x : s2a.x) < (s1a.x < s1b.x ? s1a.x : s1b.x) ||
+        (s1a.y < s1b.y ? s1b.y : s1a.y) < (s2a.y < s2b.y ? s2a.y : s2b.y) ||
+        (s2a.y < s2b.y ? s2b.y : s2a.y) < (s1a.y < s1b.y ? s1a.y : s1b.y)) return IntersectKind.none;
 
     const d1 = adaptiveOrient2dSign(s2a.x, s2a.y, s2b.x, s2b.y, s1a.x, s1a.y);
     const d2 = adaptiveOrient2dSign(s2a.x, s2a.y, s2b.x, s2b.y, s1b.x, s1b.y);

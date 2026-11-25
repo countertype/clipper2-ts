@@ -13,7 +13,8 @@ import {
   Point64, PointD, Path64, PathD, Paths64, PathsD, Rect64, RectD,
   ClipType, PathType, FillRule, PointInPolygonResult,
   InternalClipper, Point64Utils, PointDUtils, Rect64Utils, RectDUtils,
-  InvalidRect64, InvalidRectD
+  InvalidRect64, InvalidRectD,
+  stripDuplicates64, ellipse64, scalePathDTo64
 } from './Core.js';
 import { Clipper64, ClipperD, PolyTree64, PolyTreeD, PolyPathD } from './Engine.js';
 import { ClipperOffset, JoinType, EndType } from './Offset.js';
@@ -50,15 +51,16 @@ export function union(subject: Paths64, clipOrFillRule: Paths64 | FillRule, fill
   }
 }
 
-export function unionD(subject: PathsD, fillRule: FillRule): PathsD;
+export function unionD(subject: PathsD, fillRule: FillRule, precision?: number): PathsD;
 export function unionD(subject: PathsD, clip: PathsD, fillRule: FillRule, precision?: number): PathsD;
 export function unionD(subject: PathsD, clipOrFillRule: PathsD | FillRule, fillRuleOrPrecision?: FillRule | number, precision?: number): PathsD {
+  // (a precision of 0 is valid, so only a missing one takes the default)
   if (typeof clipOrFillRule === 'number') {
-    // First overload: unionD(subject, fillRule)
-    return booleanOpD(ClipType.Union, subject, null, clipOrFillRule);
+    // First overload: unionD(subject, fillRule, precision)
+    return booleanOpD(ClipType.Union, subject, null, clipOrFillRule, fillRuleOrPrecision ?? 2);
   } else {
     // Second overload: unionD(subject, clip, fillRule, precision)
-    return booleanOpD(ClipType.Union, subject, clipOrFillRule, fillRuleOrPrecision as FillRule, precision || 2);
+    return booleanOpD(ClipType.Union, subject, clipOrFillRule, fillRuleOrPrecision as FillRule, precision ?? 2);
   }
 }
 
@@ -147,122 +149,84 @@ export function inflatePathsD(paths: PathsD, delta: number, joinType: JoinType, 
   return scalePathsD(solution, 1 / scale);
 }
 
+// Rect64 and RectD are the same shape here, where C++ chooses by type. rectClip and
+// rectClipLines take the integer form unless a precision is given or the rect itself has
+// a fraction, and never look at the paths to decide. rectClipD and rectClipLinesD always
+// take the decimal form, whatever the values.
+function isDecimalRectCall(rect: Rect64 | RectD, precision?: number): boolean {
+  return precision !== undefined ||
+    !Number.isInteger(rect.left) || !Number.isInteger(rect.top) ||
+    !Number.isInteger(rect.right) || !Number.isInteger(rect.bottom);
+}
+
 export function rectClip(rect: Rect64, paths: Paths64): Paths64;
 export function rectClip(rect: Rect64, path: Path64): Paths64;
+/** Clips as decimals only when a precision is given or the rect has a fraction. For decimal paths in a rect that may be whole numbers, pass a precision or use `rectClipD`. */
 export function rectClip(rect: RectD, paths: PathsD, precision?: number): PathsD;
 export function rectClip(rect: RectD, path: PathD, precision?: number): PathsD;
 export function rectClip(rect: Rect64 | RectD, pathsOrPath: Paths64 | Path64 | PathsD | PathD, precision?: number): Paths64 | PathsD {
-  if ('left' in rect && typeof rect.left === 'number' && Number.isInteger(rect.left)) {
-    // Rect64 case
-    const rect64 = rect as Rect64;
-    if (Rect64Utils.isEmpty(rect64)) return [];
-    
-    if (Array.isArray(pathsOrPath[0])) {
-      // Paths64
-      const paths = pathsOrPath as Paths64;
-      if (paths.length === 0) return [];
-      const rc = new RectClip64(rect64);
-      return rc.execute(paths);
-    } else {
-      // Path64
-      const path = pathsOrPath as Path64;
-      if (path.length === 0) return [];
-      const tmp: Paths64 = [path];
-      return rectClip(rect64, tmp);
-    }
-  } else {
-    // RectD case
-    const rectD = rect as RectD;
-    const prec = precision || 2;
-    InternalClipper.checkPrecision(prec);
-    if (RectDUtils.isEmpty(rectD)) return [];
-    
-    const scale = Math.pow(10, prec);
-    const r = scaleRect(rectD, scale);
-    
-    if (Array.isArray(pathsOrPath[0])) {
-      // PathsD
-      const paths = pathsOrPath as PathsD;
-      if (paths.length === 0) return [];
-      const tmpPath = scalePaths64(paths, scale);
-      const rc = new RectClip64(r);
-      const result = rc.execute(tmpPath);
-      return scalePathsD(result, 1 / scale);
-    } else {
-      // PathD
-      const path = pathsOrPath as PathD;
-      if (path.length === 0) return [];
-      const tmp: PathsD = [path];
-      return rectClip(rectD, tmp, prec);
-    }
+  if (isDecimalRectCall(rect, precision)) {
+    return rectClipD(rect, pathsOrPath as PathsD, precision);
   }
+  if (Rect64Utils.isEmpty(rect)) return [];
+  if (pathsOrPath.length === 0) return [];
+  const paths = Array.isArray(pathsOrPath[0]) ? pathsOrPath as Paths64 : [pathsOrPath as Path64];
+  return new RectClip64(rect).execute(paths);
+}
+
+export function rectClipD(rect: RectD, paths: PathsD, precision?: number): PathsD;
+export function rectClipD(rect: RectD, path: PathD, precision?: number): PathsD;
+export function rectClipD(rect: RectD, pathsOrPath: PathsD | PathD, precision: number = 2): PathsD {
+  InternalClipper.checkPrecision(precision);
+  if (RectDUtils.isEmpty(rect)) return [];
+  if (pathsOrPath.length === 0) return [];
+  const paths = Array.isArray(pathsOrPath[0]) ? pathsOrPath as PathsD : [pathsOrPath as PathD];
+  const scale = Math.pow(10, precision);
+  const rc = new RectClip64(scaleRect(rect, scale));
+  return scalePathsD(rc.execute(scalePaths64(paths, scale)), 1 / scale);
 }
 
 export function rectClipLines(rect: Rect64, paths: Paths64): Paths64;
 export function rectClipLines(rect: Rect64, path: Path64): Paths64;
+/** Clips as decimals only when a precision is given or the rect has a fraction. For decimal paths in a rect that may be whole numbers, pass a precision or use `rectClipLinesD`. */
 export function rectClipLines(rect: RectD, paths: PathsD, precision?: number): PathsD;
 export function rectClipLines(rect: RectD, path: PathD, precision?: number): PathsD;
 export function rectClipLines(rect: Rect64 | RectD, pathsOrPath: Paths64 | Path64 | PathsD | PathD, precision?: number): Paths64 | PathsD {
-  if ('left' in rect && typeof rect.left === 'number' && Number.isInteger(rect.left)) {
-    // Rect64 case
-    const rect64 = rect as Rect64;
-    if (Rect64Utils.isEmpty(rect64)) return [];
-    
-    if (Array.isArray(pathsOrPath[0])) {
-      // Paths64
-      const paths = pathsOrPath as Paths64;
-      if (paths.length === 0) return [];
-      const rc = new RectClipLines64(rect64);
-      return rc.execute(paths);
-    } else {
-      // Path64
-      const path = pathsOrPath as Path64;
-      if (path.length === 0) return [];
-      const tmp: Paths64 = [path];
-      return rectClipLines(rect64, tmp);
-    }
-  } else {
-    // RectD case
-    const rectD = rect as RectD;
-    const prec = precision || 2;
-    InternalClipper.checkPrecision(prec);
-    if (RectDUtils.isEmpty(rectD)) return [];
-    
-    const scale = Math.pow(10, prec);
-    const r = scaleRect(rectD, scale);
-    
-    if (Array.isArray(pathsOrPath[0])) {
-      // PathsD
-      const paths = pathsOrPath as PathsD;
-      if (paths.length === 0) return [];
-      const tmpPath = scalePaths64(paths, scale);
-      const rc = new RectClipLines64(r);
-      const result = rc.execute(tmpPath);
-      return scalePathsD(result, 1 / scale);
-    } else {
-      // PathD
-      const path = pathsOrPath as PathD;
-      if (path.length === 0) return [];
-      const tmp: PathsD = [path];
-      return rectClipLines(rectD, tmp, prec);
-    }
+  if (isDecimalRectCall(rect, precision)) {
+    return rectClipLinesD(rect, pathsOrPath as PathsD, precision);
   }
+  if (Rect64Utils.isEmpty(rect)) return [];
+  if (pathsOrPath.length === 0) return [];
+  const paths = Array.isArray(pathsOrPath[0]) ? pathsOrPath as Paths64 : [pathsOrPath as Path64];
+  return new RectClipLines64(rect).execute(paths);
+}
+
+export function rectClipLinesD(rect: RectD, paths: PathsD, precision?: number): PathsD;
+export function rectClipLinesD(rect: RectD, path: PathD, precision?: number): PathsD;
+export function rectClipLinesD(rect: RectD, pathsOrPath: PathsD | PathD, precision: number = 2): PathsD {
+  InternalClipper.checkPrecision(precision);
+  if (RectDUtils.isEmpty(rect)) return [];
+  if (pathsOrPath.length === 0) return [];
+  const paths = Array.isArray(pathsOrPath[0]) ? pathsOrPath as PathsD : [pathsOrPath as PathD];
+  const scale = Math.pow(10, precision);
+  const rc = new RectClipLines64(scaleRect(rect, scale));
+  return scalePathsD(rc.execute(scalePaths64(paths, scale)), 1 / scale);
 }
 
 export function minkowskiSum(pattern: Path64, path: Path64, isClosed: boolean): Paths64 {
   return Minkowski.sum(pattern, path, isClosed);
 }
 
-export function minkowskiSumD(pattern: PathD, path: PathD, isClosed: boolean): PathsD {
-  return Minkowski.sumD(pattern, path, isClosed);
+export function minkowskiSumD(pattern: PathD, path: PathD, isClosed: boolean, decimalPlaces: number = 2): PathsD {
+  return Minkowski.sumD(pattern, path, isClosed, decimalPlaces);
 }
 
 export function minkowskiDiff(pattern: Path64, path: Path64, isClosed: boolean): Paths64 {
   return Minkowski.diff(pattern, path, isClosed);
 }
 
-export function minkowskiDiffD(pattern: PathD, path: PathD, isClosed: boolean): PathsD {
-  return Minkowski.diffD(pattern, path, isClosed);
+export function minkowskiDiffD(pattern: PathD, path: PathD, isClosed: boolean, decimalPlaces: number = 2): PathsD {
+  return Minkowski.diffD(pattern, path, isClosed, decimalPlaces);
 }
 
 export function area(path: Path64): number {
@@ -347,8 +311,8 @@ export function offsetPath(path: Path64, dx: number, dy: number): Path64 {
 
 export function scalePoint64(pt: Point64, scale: number): Point64 {
   return {
-    x: Math.round(pt.x * scale),
-    y: Math.round(pt.y * scale)
+    x: InternalClipper.roundAwayFromZero(pt.x * scale),
+    y: InternalClipper.roundAwayFromZero(pt.y * scale)
   };
 }
 
@@ -366,10 +330,10 @@ export function scaleRect(rec: RectD, scale: number): Rect64 {
   InternalClipper.checkSafeScaleValue(rec.right, maxAbs, "scaleRect");
   InternalClipper.checkSafeScaleValue(rec.bottom, maxAbs, "scaleRect");
   return {
-    left: Math.round(rec.left * scale),
-    top: Math.round(rec.top * scale),
-    right: Math.round(rec.right * scale),
-    bottom: Math.round(rec.bottom * scale)
+    left: InternalClipper.roundAwayFromZero(rec.left * scale),
+    top: InternalClipper.roundAwayFromZero(rec.top * scale),
+    right: InternalClipper.roundAwayFromZero(rec.right * scale),
+    bottom: InternalClipper.roundAwayFromZero(rec.bottom * scale)
   };
 }
 
@@ -378,8 +342,8 @@ export function scalePath(path: Path64, scale: number): Path64 {
   const result: Path64 = [];
   for (const pt of path) {
     result.push({
-      x: Math.round(pt.x * scale),
-      y: Math.round(pt.y * scale)
+      x: InternalClipper.roundAwayFromZero(pt.x * scale),
+      y: InternalClipper.roundAwayFromZero(pt.y * scale)
     });
   }
   return result;
@@ -414,17 +378,7 @@ export function scalePathsD(paths: PathsD, scale: number): PathsD {
 
 // Unlike ScalePath, both ScalePath64 & ScalePathD also involve type conversion
 export function scalePath64(path: PathD, scale: number): Path64 {
-  const maxAbs = InternalClipper.maxSafeCoordinateForScale(scale);
-  const result: Path64 = [];
-  for (const pt of path) {
-    InternalClipper.checkSafeScaleValue(pt.x, maxAbs, "scalePath64");
-    InternalClipper.checkSafeScaleValue(pt.y, maxAbs, "scalePath64");
-    result.push({
-      x: Math.round(pt.x * scale),
-      y: Math.round(pt.y * scale)
-    });
-  }
-  return result;
+  return scalePathDTo64(path, scale);
 }
 
 export function scalePaths64(paths: PathsD, scale: number): Paths64 {
@@ -637,7 +591,9 @@ export function midPoint(pt1: Point64, pt2: Point64): Point64 {
       y: Number((BigInt(pt1.y) + BigInt(pt2.y)) / B2)
     };
   }
-  return { x: Math.round((pt1.x + pt2.x) / 2), y: Math.round((pt1.y + pt2.y) / 2) };
+  // integer division, as in C++ (and as the BigInt branch above does)
+  // (adding 0 turns the -0 that truncating gives between -1 and 0 into 0)
+  return { x: Math.trunc((pt1.x + pt2.x) / 2) + 0, y: Math.trunc((pt1.y + pt2.y) / 2) + 0 };
 }
 
 export function midPointD(pt1: PointD, pt2: PointD): PointD {
@@ -676,7 +632,9 @@ export function stripNearDuplicates(path: PathD, minEdgeLenSqrd: number, isClose
     }
   }
 
-  if (isClosedPath && pointsNearEqual(lastPt, result[0], minEdgeLenSqrd)) {
+  // (every closing point near the first is dropped, and a single point is kept, as in C++)
+  while (isClosedPath && result.length > 1 &&
+    pointsNearEqual(result[result.length - 1], result[0], minEdgeLenSqrd)) {
     result.pop();
   }
 
@@ -684,22 +642,7 @@ export function stripNearDuplicates(path: PathD, minEdgeLenSqrd: number, isClose
 }
 
 export function stripDuplicates(path: Path64, isClosedPath: boolean): Path64 {
-  const cnt = path.length;
-  const result: Path64 = [];
-  if (cnt === 0) return result;
-  
-  let lastPt = path[0];
-  result.push(lastPt);
-  for (let i = 1; i < cnt; i++) {
-    if (!Point64Utils.equals(lastPt, path[i])) {
-      lastPt = path[i];
-      result.push(lastPt);
-    }
-  }
-  if (isClosedPath && Point64Utils.equals(lastPt, result[0])) {
-    result.pop();
-  }
-  return result;
+  return stripDuplicates64(path, isClosedPath);
 }
 
 function addPolyNodeToPaths(polyPath: PolyTree64, paths: Paths64): void {
@@ -814,7 +757,8 @@ function rdpD(path: PathD, begin: number, end: number, epsSqrd: number, flags: b
   while (true) {
     let idx = 0;
     let maxD = 0;
-    while (end > begin && PointDUtils.equals(path[begin], path[end])) flags[end--] = false;
+    // (compared exactly, as in C++)
+    while (end > begin && path[begin].x === path[end].x && path[begin].y === path[end].y) flags[end--] = false;
     for (let i = begin + 1; i < end; ++i) {
       // PerpendicDistFromLineSqrd - avoids expensive Sqrt()
       const d = perpendicDistFromLineSqrd(path[i], path[begin], path[end]);
@@ -1083,6 +1027,8 @@ export function pointInPolygon(pt: Point64, polygon: Path64): PointInPolygonResu
   return InternalClipper.pointInPolygon(pt, polygon);
 }
 
+// TS: the point and polygon are rounded to the precision first, as in C#, so a point within
+// half a step of an edge is on it. C++ tests the doubles as they are.
 export function pointInPolygonD(pt: PointD, polygon: PathD, precision: number = 2): PointInPolygonResult {
   InternalClipper.checkPrecision(precision);
   const scale = Math.pow(10, precision);
@@ -1095,35 +1041,15 @@ export function pointInPolygonD(pt: PointD, polygon: PathD, precision: number = 
 }
 
 export function ellipse(center: Point64, radiusX: number, radiusY: number = 0, steps: number = 0): Path64 {
-  if (radiusX <= 0) return [];
-  if (radiusY <= 0) radiusY = radiusX;
-  if (steps <= 2) {
-    steps = Math.ceil(Math.PI * Math.sqrt((radiusX + radiusY) / 2));
-  }
-
-  const si = Math.sin(2 * Math.PI / steps);
-  const co = Math.cos(2 * Math.PI / steps);
-  let dx = co;
-  let dy = si;
-  const result: Path64 = [{ x: Math.round(center.x + radiusX), y: center.y }];
-  
-  for (let i = 1; i < steps; ++i) {
-    result.push({
-      x: Math.round(center.x + radiusX * dx),
-      y: Math.round(center.y + radiusY * dy)
-    });
-    const x = dx * co - dy * si;
-    dy = dy * co + dx * si;
-    dx = x;
-  }
-  return result;
+  return ellipse64(center, radiusX, radiusY, steps);
 }
 
 export function ellipseD(center: PointD, radiusX: number, radiusY: number = 0, steps: number = 0): PathD {
   if (radiusX <= 0) return [];
   if (radiusY <= 0) radiusY = radiusX;
   if (steps <= 2) {
-    steps = Math.ceil(Math.PI * Math.sqrt((radiusX + radiusY) / 2));
+    steps = Math.trunc(Math.PI * Math.sqrt((radiusX + radiusY) / 2)); // truncated, as in C++
+    if (steps < 3) steps = 3; // TS: C++ has no minimum
   }
 
   const si = Math.sin(2 * Math.PI / steps);
@@ -1145,12 +1071,20 @@ export function ellipseD(center: PointD, radiusX: number, radiusY: number = 0, s
 }
 
 // Triangulation
-export function triangulate(pp: Paths64, useDelaunay: boolean = true): { result: TriangulateResult, solution: Paths64 } {
-  const d = new Delaunay(useDelaunay);
+// Triangulates non-intersecting outer/hole contours.
+// useDelaunay: optimize interior edges using Delaunay legalization (default true).
+// preserveCollinear: keep every boundary segment, or return fail where one can't
+// be kept (default false).
+/** @deprecated Triangulation will be removed in the next release. See https://github.com/countertype/clipper2-ts/issues/41 */
+export function triangulate(pp: Paths64, useDelaunay: boolean = true, preserveCollinear: boolean = false): { result: TriangulateResult, solution: Paths64 } {
+  const d = new Delaunay(useDelaunay, preserveCollinear);
   return d.execute(pp);
 }
 
-export function triangulateD(pp: PathsD, decPlaces: number, useDelaunay: boolean = true): { result: TriangulateResult, solution: PathsD } {
+// decPlaces: decimal precision for the integer grid, clamped to 0..8.
+// useDelaunay and preserveCollinear: as for triangulate, on the rounded coordinates.
+/** @deprecated Triangulation will be removed in the next release. See https://github.com/countertype/clipper2-ts/issues/41 */
+export function triangulateD(pp: PathsD, decPlaces: number, useDelaunay: boolean = true, preserveCollinear: boolean = false): { result: TriangulateResult, solution: PathsD } {
   let scale: number;
   if (decPlaces <= 0) scale = 1.0;
   else if (decPlaces > 8) scale = Math.pow(10.0, 8.0);
@@ -1158,7 +1092,7 @@ export function triangulateD(pp: PathsD, decPlaces: number, useDelaunay: boolean
 
   const pp64 = scalePaths64(pp, scale);
 
-  const d = new Delaunay(useDelaunay);
+  const d = new Delaunay(useDelaunay, preserveCollinear);
   const { result, solution: sol64 } = d.execute(pp64);
 
   let solution: PathsD;
@@ -1192,7 +1126,9 @@ export const Clipper = {
   inflatePaths,
   inflatePathsD,
   rectClip,
+  rectClipD,
   rectClipLines,
+  rectClipLinesD,
   minkowskiSum,
   minkowskiSumD,
   minkowskiDiff,
